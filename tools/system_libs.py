@@ -1049,7 +1049,7 @@ class libc(MuslInternalLibrary,
       path='system/lib/libc/musl/src/errno',
       filenames=['__errno_location.c'])
 
-    html5_files += files_in_path(
+    html5_files = files_in_path(
       path='system/lib/html5',
       filenames=['callback.c'])
 
