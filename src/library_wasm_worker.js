@@ -7,9 +7,9 @@
 #if WASM_WORKERS == 2
 // Helpers for _wasmWorkerBlobUrl used in WASM_WORKERS == 2 mode
 {{{
-  global.captureModuleArg = () => MODULARIZE ? '' : 'self.Module=d;';
-  global.instantiateModule = () => MODULARIZE ? `${EXPORT_NAME}(d);` : '';
-  global.instantiateWasm = () => MINIMAL_RUNTIME ? '' : 'd[`instantiateWasm`]=(i,r)=>{var n=new WebAssembly.Instance(d[`wasm`],i);return r(n,d[`wasm`]);};';
+  globalThis.captureModuleArg = () => MODULARIZE ? '' : 'self.Module=d;';
+  globalThis.instantiateModule = () => MODULARIZE ? `${EXPORT_NAME}(d);` : '';
+  globalThis.instantiateWasm = () => MINIMAL_RUNTIME ? '' : 'd[`instantiateWasm`]=(i,r)=>{var n=new WebAssembly.Instance(d[`wasm`],i);return r(n,d[`wasm`]);};';
   null;
 }}}
 #endif
@@ -69,7 +69,15 @@ addToLibrary({
 
   // src/postamble_minimal.js brings this symbol in to the build, and calls this
   // function synchronously from main JS file at the startup of each Worker.
-  $_wasmWorkerInitializeRuntime__deps: ['$_wasmWorkerDelayedMessageQueue', '$_wasmWorkerRunPostMessage', '$_wasmWorkerAppendToQueue', 'emscripten_wasm_worker_initialize'],
+  $_wasmWorkerInitializeRuntime__deps: [
+    '$_wasmWorkerDelayedMessageQueue',
+    '$_wasmWorkerRunPostMessage',
+    '$_wasmWorkerAppendToQueue',
+    'emscripten_wasm_worker_initialize',
+#if PTHREADS
+    '__set_thread_state',
+#endif
+  ],
   $_wasmWorkerInitializeRuntime: () => {
     let m = Module;
 #if ASSERTIONS

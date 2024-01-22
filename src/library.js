@@ -48,8 +48,8 @@ addToLibrary({
 #if SAFE_HEAP
   // Trivial wrappers around runtime functions that make these symbols available
   // to native code.
-  segfault: () => segfault(),
-  alignfault: () => alignfault(),
+  segfault: '=segfault',
+  alignfault: '=alignfault',
 #endif
 
   // ==========================================================================
@@ -328,8 +328,7 @@ addToLibrary({
     updateMemoryViews();
   },
 
-  system__deps: ['$setErrNo'],
-  system: (command) => {
+  _emscripten_system: (command) => {
 #if ENVIRONMENT_MAY_BE_NODE
     if (ENVIRONMENT_IS_NODE) {
       if (!command) return 1; // shell is available
@@ -368,8 +367,7 @@ addToLibrary({
     // http://pubs.opengroup.org/onlinepubs/000095399/functions/system.html
     // Can't call external programs.
     if (!command) return 0; // no shell available
-    setErrNo({{{ cDefs.ENOSYS }}});
-    return -1;
+    return -{{{ cDefs.ENOSYS }}};
   },
 
   // ==========================================================================
@@ -402,7 +400,7 @@ addToLibrary({
   // so we cannot override parts of it, and therefore cannot use libc_optz.
 #if (SHRINK_LEVEL < 2 || LINKABLE || process.env.EMCC_FORCE_STDLIBS) && !STANDALONE_WASM && !BULK_MEMORY
 
-#if MIN_CHROME_VERSION < 45 || MIN_EDGE_VERSION < 14 || MIN_FIREFOX_VERSION < 34 || MIN_IE_VERSION != TARGET_NOT_SUPPORTED || MIN_SAFARI_VERSION < 100101
+#if MIN_CHROME_VERSION < 45 || MIN_FIREFOX_VERSION < 34 || MIN_SAFARI_VERSION < 100101
   // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/copyWithin lists browsers that support TypedArray.prototype.copyWithin, but it
   // has outdated information for Safari, saying it would not support it.
   // https://github.com/WebKit/webkit/commit/24a800eea4d82d6d595cdfec69d0f68e733b5c52#diff-c484911d8df319ba75fce0d8e7296333R1 suggests support was added on Aug 28, 2015.
@@ -437,7 +435,7 @@ addToLibrary({
   // ==========================================================================
 
   _mktime_js__i53abi: true,
-  _mktime_js__deps: ['$ydayFromDate', '$setErrNo'],
+  _mktime_js__deps: ['$ydayFromDate'],
   _mktime_js: (tmPtr) => {
     var date = new Date({{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_year, 'i32') }}} + 1900,
                         {{{ makeGetValue('tmPtr', C_STRUCTS.tm.tm_mon, 'i32') }}},
@@ -479,7 +477,6 @@ addToLibrary({
 
     var timeMs = date.getTime();
     if (isNaN(timeMs)) {
-      setErrNo({{{ cDefs.EOVERFLOW }}});
       return -1;
     }
     // Return time in microseconds
@@ -595,6 +592,7 @@ addToLibrary({
 #endif
 
   $withStackSave__internal: true,
+  $withStackSave__deps: ['stackSave', 'stackRestore'],
   $withStackSave: (f) => {
     var stack = stackSave();
     var ret = f();
@@ -851,7 +849,7 @@ addToLibrary({
 
         return getWeekBasedYear(date).toString().substring(2);
       },
-      '%G': (date) => getWeekBasedYear(date),
+      '%G': getWeekBasedYear,
       '%H': (date) => leadingNulls(date.tm_hour, 2),
       '%I': (date) => {
         var twelveHour = date.tm_hour;
@@ -1522,20 +1520,6 @@ addToLibrary({
     {{{ cDefs.EOWNERDEAD }}}: 'Previous owner died',
     {{{ cDefs.ESTRPIPE }}}: 'Streams pipe error',
   },
-#if SUPPORT_ERRNO
-  $setErrNo__deps: ['__errno_location'],
-  $setErrNo: (value) => {
-    {{{makeSetValue("___errno_location()", 0, 'value', 'i32') }}};
-    return value;
-  },
-#else
-  $setErrNo: (value) => {
-#if ASSERTIONS
-    err('failed to set errno from JS');
-#endif
-    return 0;
-  },
-#endif
 
 #if PROXY_POSIX_SOCKETS == 0
   // ==========================================================================
@@ -1824,57 +1808,11 @@ addToLibrary({
     }
   },
 
-  // note: lots of leaking here!
-  gethostbyaddr__deps: ['$DNS', '$getHostByName', '$inetNtop4', '$setErrNo'],
-  gethostbyaddr__proxy: 'sync',
-  gethostbyaddr: (addr, addrlen, type) => {
-    if (type !== {{{ cDefs.AF_INET }}}) {
-      setErrNo({{{ cDefs.EAFNOSUPPORT }}});
-      // TODO: set h_errno
-      return null;
-    }
-    addr = {{{ makeGetValue('addr', '0', 'i32') }}}; // addr is in_addr
-    var host = inetNtop4(addr);
-    var lookup = DNS.lookup_addr(host);
-    if (lookup) {
-      host = lookup;
-    }
-    return getHostByName(host);
-  },
-
-  gethostbyname__deps: ['$getHostByName'],
-  gethostbyname__proxy: 'sync',
-  gethostbyname: (name) => getHostByName(UTF8ToString(name)),
-
-  $getHostByName__deps: ['malloc', '$stringToNewUTF8', '$DNS', '$inetPton4'],
-  $getHostByName: (name) => {
-    // generate hostent
-    var ret = _malloc({{{ C_STRUCTS.hostent.__size__ }}}); // XXX possibly leaked, as are others here
-    var nameBuf = stringToNewUTF8(name);
-    {{{ makeSetValue('ret', C_STRUCTS.hostent.h_name, 'nameBuf', POINTER_TYPE) }}};
-    var aliasesBuf = _malloc(4);
-    {{{ makeSetValue('aliasesBuf', '0', '0', POINTER_TYPE) }}};
-    {{{ makeSetValue('ret', C_STRUCTS.hostent.h_aliases, 'aliasesBuf', 'i8**') }}};
-    var afinet = {{{ cDefs.AF_INET }}};
-    {{{ makeSetValue('ret', C_STRUCTS.hostent.h_addrtype, 'afinet', 'i32') }}};
-    {{{ makeSetValue('ret', C_STRUCTS.hostent.h_length, '4', 'i32') }}};
-    var addrListBuf = _malloc(12);
-    {{{ makeSetValue('addrListBuf', '0', 'addrListBuf+8', POINTER_TYPE) }}};
-    {{{ makeSetValue('addrListBuf', '4', '0', POINTER_TYPE) }}};
-    {{{ makeSetValue('addrListBuf', '8', 'inetPton4(DNS.lookup_name(name))', 'i32') }}};
-    {{{ makeSetValue('ret', C_STRUCTS.hostent.h_addr_list, 'addrListBuf', 'i8**') }}};
-    return ret;
-  },
-
-  gethostbyname_r__deps: ['gethostbyname', 'memcpy', 'free'],
-  gethostbyname_r__proxy: 'sync',
-  gethostbyname_r: (name, ret, buf, buflen, out, err) => {
-    var data = _gethostbyname(name);
-    _memcpy(ret, data, {{{ C_STRUCTS.hostent.__size__ }}});
-    _free(data);
-    {{{ makeSetValue('err', '0', '0', 'i32') }}};
-    {{{ makeSetValue('out', '0', 'ret', '*') }}};
-    return 0;
+  _emscripten_lookup_name__deps: ['$UTF8ToString', '$DNS', '$inetPton4'],
+  _emscripten_lookup_name: (name) => {
+    // uint32_t _emscripten_lookup_name(const char *name);
+    var nameString = UTF8ToString(name);
+    return inetPton4(DNS.lookup_name(nameString));
   },
 
   getaddrinfo__deps: ['$Sockets', '$DNS', '$inetPton4', '$inetNtop4', '$inetPton6', '$inetNtop6', '$writeSockaddr', 'malloc', 'htonl'],
@@ -2184,11 +2122,10 @@ addToLibrary({
   // nonblocking
   // ==========================================================================
 #if SOCKET_WEBRTC
-  $Sockets__deps: ['$setErrNo',
+  $Sockets__deps: [
     () => 'var SocketIO = ' + read('../third_party/socket.io.js') + ';\n',
-    () => 'var Peer = ' + read('../third_party/wrtcp.js') + ';\n'],
-#else
-  $Sockets__deps: ['$setErrNo'],
+    () => 'var Peer = ' + read('../third_party/wrtcp.js') + ';\n'
+  ],
 #endif
   $Sockets: {
     BUFFER_SIZE: 10*1024, // initial size
@@ -2358,7 +2295,7 @@ addToLibrary({
     // respective time origins.
     _emscripten_get_now = () => performance.timeOrigin + {{{ getPerformanceNow() }}}();
 #else
-#if MIN_IE_VERSION <= 9 || MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 || AUDIO_WORKLET // https://caniuse.com/#feat=high-resolution-time
+#if MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 || AUDIO_WORKLET // https://caniuse.com/#feat=high-resolution-time
     // AudioWorkletGlobalScope does not have performance.now()
     // (https://github.com/WebAudio/web-audio-api/issues/2527), so if building
     // with
@@ -2387,7 +2324,7 @@ addToLibrary({
       return 1; // nanoseconds
     }
 #endif
-#if MIN_IE_VERSION <= 9 || MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 // https://caniuse.com/#feat=high-resolution-time
+#if MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 // https://caniuse.com/#feat=high-resolution-time
     if (typeof performance == 'object' && performance && typeof performance['now'] == 'function') {
       return 1000; // microseconds (1/1000 of a millisecond)
     }
@@ -2401,7 +2338,7 @@ addToLibrary({
   // Represents whether emscripten_get_now is guaranteed monotonic; the Date.now
   // implementation is not :(
   $nowIsMonotonic__internal: true,
-#if MIN_IE_VERSION <= 9 || MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 // https://caniuse.com/#feat=high-resolution-time
+#if MIN_FIREFOX_VERSION <= 14 || MIN_CHROME_VERSION <= 23 || MIN_SAFARI_VERSION <= 80400 // https://caniuse.com/#feat=high-resolution-time
   $nowIsMonotonic: `
      ((typeof performance == 'object' && performance && typeof performance['now'] == 'function')
 #if ENVIRONMENT_MAY_BE_NODE
@@ -2418,7 +2355,7 @@ addToLibrary({
   _emscripten_get_now_is_monotonic: () => nowIsMonotonic,
 
   $warnOnce: (text) => {
-    if (!warnOnce.shown) warnOnce.shown = {};
+    warnOnce.shown ||= {};
     if (!warnOnce.shown[text]) {
       warnOnce.shown[text] = 1;
 #if ENVIRONMENT_MAY_BE_NODE
@@ -2498,7 +2435,7 @@ addToLibrary({
 
       if (flags & {{{ cDefs.EM_LOG_C_STACK }}}) {
         var orig = emscripten_source_map.originalPositionFor({line: lineno, column: column});
-        haveSourceMap = (orig && orig.source);
+        haveSourceMap = orig?.source;
         if (haveSourceMap) {
           if (flags & {{{ cDefs.EM_LOG_NO_PATHS }}}) {
             orig.source = orig.source.substring(orig.source.replace(/\\/g, "/").lastIndexOf('/')+1);
@@ -3032,7 +2969,7 @@ addToLibrary({
   // Converts a JS string to an integer base-10, with signaling error
   // handling (throws a JS exception on error). E.g. jstoi_s("123abc")
   // throws an exception.
-  $jstoi_s: (str) => Number(str),
+  $jstoi_s: 'Number',
 
 #if LINK_AS_CXX
   // libunwind
@@ -3090,7 +3027,7 @@ addToLibrary({
   },
 
   $listenOnce: (object, event, func) => {
-#if MIN_CHROME_VERSION < 55 || MIN_EDGE_VERSION < 18 || MIN_FIREFOX_VERSION < 50 || MIN_IE_VERSION != TARGET_NOT_SUPPORTED // https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener
+#if MIN_CHROME_VERSION < 55 || MIN_FIREFOX_VERSION < 50 // https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener
     object.addEventListener(event, function handler() {
       func();
       object.removeEventListener(event, handler);
@@ -3139,7 +3076,7 @@ addToLibrary({
 #else
     assert(('dynCall_' + sig) in Module, `bad function pointer type - dynCall function not found for sig '${sig}'`);
 #endif
-    if (args && args.length) {
+    if (args?.length) {
 #if WASM_BIGINT
       // j (64-bit integer) is fine, and is implemented as a BigInt. Without
       // legalization, the number of parameters should match (j is not expanded
@@ -3524,7 +3461,9 @@ addToLibrary({
   $asyncLoad: (url, onload, onerror, noRunDep) => {
     var dep = !noRunDep ? getUniqueRunDependency(`al ${url}`) : '';
     readAsync(url, (arrayBuffer) => {
+#if ASSERTIONS
       assert(arrayBuffer, `Loading data file "${url}" failed (no arrayBuffer).`);
+#endif
       onload(new Uint8Array(arrayBuffer));
       if (dep) removeRunDependency(dep);
     }, (event) => {
@@ -3621,41 +3560,37 @@ addToLibrary({
 #endif
   },
 
-  $handleAllocatorInit: function() {
-    Object.assign(HandleAllocator.prototype, /** @lends {HandleAllocator.prototype} */ {
-      get(id) {
-  #if ASSERTIONS
-        assert(this.allocated[id] !== undefined, `invalid handle: ${id}`);
-  #endif
-        return this.allocated[id];
-      },
-      has(id) {
-        return this.allocated[id] !== undefined;
-      },
-      allocate(handle) {
-        var id = this.freelist.pop() || this.allocated.length;
-        this.allocated[id] = handle;
-        return id;
-      },
-      free(id) {
-  #if ASSERTIONS
-        assert(this.allocated[id] !== undefined);
-  #endif
-        // Set the slot to `undefined` rather than using `delete` here since
-        // apparently arrays with holes in them can be less efficient.
-        this.allocated[id] = undefined;
-        this.freelist.push(id);
-      }
-    });
-  },
-
-  $HandleAllocator__postset: 'handleAllocatorInit()',
-  $HandleAllocator__deps: ['$handleAllocatorInit'],
-  $HandleAllocator__docs: '/** @constructor */',
-  $HandleAllocator: function() {
-    // Reserve slot 0 so that 0 is always an invalid handle
-    this.allocated = [undefined];
-    this.freelist = [];
+  $HandleAllocator: class {
+    constructor() {
+      // TODO(sbc): Use class fields once we allow/enable es2022 in
+      // JavaScript input to acorn and closure.
+      // Reserve slot 0 so that 0 is always an invalid handle
+      this.allocated = [undefined];
+      this.freelist = [];
+    }
+    get(id) {
+#if ASSERTIONS
+      assert(this.allocated[id] !== undefined, `invalid handle: ${id}`);
+#endif
+      return this.allocated[id];
+    };
+    has(id) {
+      return this.allocated[id] !== undefined;
+    };
+    allocate(handle) {
+      var id = this.freelist.pop() || this.allocated.length;
+      this.allocated[id] = handle;
+      return id;
+    };
+    free(id) {
+#if ASSERTIONS
+      assert(this.allocated[id] !== undefined);
+#endif
+      // Set the slot to `undefined` rather than using `delete` here since
+      // apparently arrays with holes in them can be less efficient.
+      this.allocated[id] = undefined;
+      this.freelist.push(id);
+    };
   },
 
   $getNativeTypeSize__deps: ['$POINTER_SIZE'],

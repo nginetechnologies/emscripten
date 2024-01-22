@@ -33,6 +33,7 @@ from .shared import LLVM_DWARFDUMP, demangle_c_symbol_name
 from .shared import get_emscripten_temp_dir, exe_suffix, is_c_symbol
 from .utils import WINDOWS
 from .settings import settings, default_setting
+from .feature_matrix import UNSUPPORTED
 
 logger = logging.getLogger('building')
 
@@ -190,19 +191,19 @@ def lld_flags_for_executable(external_symbols):
   c_exports = [e for e in settings.EXPORTED_FUNCTIONS if is_c_symbol(e)]
   # Strip the leading underscores
   c_exports = [demangle_c_symbol_name(e) for e in c_exports]
-  c_exports += settings.EXPORT_IF_DEFINED
   # Filter out symbols external/JS symbols
   c_exports = [e for e in c_exports if e not in external_symbols]
+  c_exports += settings.REQUIRED_EXPORTS
   if settings.MAIN_MODULE:
     c_exports += side_module_external_deps(external_symbols)
   for export in c_exports:
-    cmd.append('--export-if-defined=' + export)
-
-  for export in settings.REQUIRED_EXPORTS:
     if settings.ERROR_ON_UNDEFINED_SYMBOLS:
       cmd.append('--export=' + export)
     else:
       cmd.append('--export-if-defined=' + export)
+
+  for e in settings.EXPORT_IF_DEFINED:
+    cmd.append('--export-if-defined=' + e)
 
   if settings.RELOCATABLE:
     cmd.append('--experimental-pic')
@@ -270,8 +271,8 @@ def link_lld(args, target, external_symbols=None):
   if settings.STRICT:
     args.append('--fatal-warnings')
 
-  if '--strip-all' in args:
-    # Tell wasm-ld to always generate a target_features section even if --strip-all
+  if any(a in args for a in ('--strip-all', '-s')):
+    # Tell wasm-ld to always generate a target_features section even if --strip-all/-s
     # is passed.
     args.append('--keep-section=target_features')
 
@@ -490,33 +491,49 @@ def get_closure_compiler_and_env(user_args):
 
   native_closure_compiler_works = check_closure_compiler(closure_cmd, user_args, env, allowed_to_fail=True)
   if not native_closure_compiler_works and not any(a.startswith('--platform') for a in user_args):
-    # Run with Java Closure compiler as a fallback if the native version does not work
+    # Run with Java Closure compiler as a fallback if the native version does not work.
+    # This can happen, for example, on arm64 macOS machines that do not have Rosetta installed.
+    logger.warn('falling back to java version of closure compiler')
     user_args.append('--platform=java')
     check_closure_compiler(closure_cmd, user_args, env, allowed_to_fail=False)
-
-  if config.JAVA and '--platform=java' in user_args:
-    # Closure compiler expects JAVA_HOME to be set *and* java.exe to be in the PATH in order
-    # to enable use the java backend.  Without this it will only try the native and JavaScript
-    # versions of the compiler.
-    java_bin = os.path.dirname(config.JAVA)
-    if java_bin:
-      def add_to_path(dirname):
-        env['PATH'] = env['PATH'] + os.pathsep + dirname
-      add_to_path(java_bin)
-      java_home = os.path.dirname(java_bin)
-      env.setdefault('JAVA_HOME', java_home)
 
   return closure_cmd, env
 
 
+def version_split(v):
+  """Split version setting number (e.g. 162000) into versions string (e.g. "16.2.0")
+  """
+  v = str(v).rjust(6, '0')
+  assert len(v) == 6
+  m = re.match(r'(\d{2})(\d{2})(\d{2})', v)
+  major, minor, rev = m.group(1, 2, 3)
+  return f'{int(major)}.{int(minor)}.{int(rev)}'
+
+
 @ToolchainProfiler.profile()
-def closure_transpile(filename):
-  user_args = []
-  closure_cmd, env = get_closure_compiler_and_env(user_args)
-  closure_cmd += ['--language_out', 'ES5']
-  closure_cmd += ['--compilation_level', 'SIMPLE_OPTIMIZATIONS']
-  closure_cmd += ['--formatting', 'PRETTY_PRINT']
-  return run_closure_cmd(closure_cmd, filename, env)
+def transpile(filename):
+  config = {
+    'sourceType': 'script',
+    'targets': {}
+  }
+  if settings.MIN_CHROME_VERSION != UNSUPPORTED:
+    config['targets']['chrome'] = str(settings.MIN_CHROME_VERSION)
+  if settings.MIN_FIREFOX_VERSION != UNSUPPORTED:
+    config['targets']['firefox'] = str(settings.MIN_FIREFOX_VERSION)
+  if settings.MIN_IE_VERSION != UNSUPPORTED:
+    config['targets']['ie'] = str(settings.MIN_IE_VERSION)
+  if settings.MIN_SAFARI_VERSION != UNSUPPORTED:
+    config['targets']['safari'] = version_split(settings.MIN_SAFARI_VERSION)
+  if settings.MIN_NODE_VERSION != UNSUPPORTED:
+    config['targets']['node'] = version_split(settings.MIN_NODE_VERSION)
+  config_json = json.dumps(config, indent=2)
+  outfile = shared.get_temp_files().get('babel.js').name
+  config_file = shared.get_temp_files().get('babel_config.json').name
+  logger.debug(config_json)
+  utils.write_file(config_file, config_json)
+  cmd = shared.get_npm_cmd('babel') + [filename, '-o', outfile, '--presets', '@babel/preset-env', '--config-file', config_file]
+  check_call(cmd, cwd=path_from_root())
+  return outfile
 
 
 @ToolchainProfiler.profile()
@@ -581,13 +598,8 @@ def closure_compiler(filename, advanced=True, extra_closure_args=None):
   args = ['--compilation_level', 'ADVANCED_OPTIMIZATIONS' if advanced else 'SIMPLE_OPTIMIZATIONS']
   # Keep in sync with ecmaVersion in tools/acorn-optimizer.mjs
   args += ['--language_in', 'ECMASCRIPT_2021']
-  # Tell closure not to do any transpiling or inject any polyfills.
-  # At some point we may want to look into using this as way to convert to ES5 but
-  # babel is perhaps a better tool for that.
-  if settings.TRANSPILE_TO_ES5:
-    args += ['--language_out', 'ES5']
-  else:
-    args += ['--language_out', 'NO_TRANSPILE']
+  # We do transpilation using babel
+  args += ['--language_out', 'NO_TRANSPILE']
   # Tell closure never to inject the 'use strict' directive.
   args += ['--emit_use_strict=false']
 
@@ -1127,7 +1139,7 @@ def map_to_js_libs(library_name):
     'SDL': ['library_sdl.js'],
     'uuid': ['library_uuid.js'],
     'websocket': ['library_websocket.js'],
-    # These 4 libraries are seperate under glibc but are all rolled into
+    # These 4 libraries are separate under glibc but are all rolled into
     # libc with musl.  For compatibility with glibc we just ignore them
     # completely.
     'dl': [],

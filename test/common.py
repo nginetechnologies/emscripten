@@ -25,6 +25,7 @@ import string
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import webbrowser
 import unittest
@@ -321,7 +322,7 @@ def env_modify(updates):
   # on the mock library is probably not worth the benefit.
   old_env = os.environ.copy()
   print("env_modify: " + str(updates))
-  # Seting a value to None means clear the environment variable
+  # Setting a value to None means clear the environment variable
   clears = [key for key, value in updates.items() if value is None]
   updates = {key: value for key, value in updates.items() if value is not None}
   os.environ.update(updates)
@@ -505,6 +506,10 @@ def create_file(name, contents, binary=False, absolute=False):
   if binary:
     name.write_bytes(contents)
   else:
+    # Dedent the contents of text files so that the files on disc all
+    # start in column 1, even if they are indented when embedded in the
+    # python test code.
+    contents = textwrap.dedent(contents)
     name.write_text(contents, encoding='utf-8')
 
 
@@ -660,10 +665,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       self.skipTest('no dynamic linking support in wasm2js yet')
     if '-fsanitize=undefined' in self.emcc_args:
       self.skipTest('no dynamic linking support in UBSan yet')
-    # Dynamic linking requires IMPORTED_MEMORY which depends on the JS API
-    # for creating 64-bit memories.
-    if self.get_setting('GLOBAL_BASE') == '4gb':
-      self.skipTest('no support for IMPORTED_MEMORY over 4gb yet')
 
   def require_v8(self):
     if not config.V8_ENGINE or config.V8_ENGINE not in config.JS_ENGINES:
@@ -865,6 +866,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       )
       if node_version < emcc_min_node_version:
         self.emcc_args += building.get_emcc_node_flags(node_version)
+        self.emcc_args.append('-Wno-transpile')
 
     self.v8_args = ['--wasm-staging']
     self.env = {}
@@ -894,14 +896,14 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
         if EMTEST_SAVE_DIR == 2:
           print('Not clearing existing test directory')
         else:
-          print('Clearing existing test directory')
+          logger.debug('Clearing existing test directory: %s', self.working_dir)
           # Even when --save-dir is used we still try to start with an empty directory as many tests
           # expect this.  --no-clean can be used to keep the old contents for the new test
           # run. This can be useful when iterating on a given test with extra files you want to keep
           # around in the output directory.
           force_delete_contents(self.working_dir)
       else:
-        print('Creating new test output directory')
+        logger.debug('Creating new test output directory: %s', self.working_dir)
         ensure_dir(self.working_dir)
       utils.write_file(LAST_TEST, self.id() + '\n')
     os.chdir(self.working_dir)
@@ -1573,12 +1575,9 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   def do_runf(self, filename, expected_output=None, **kwargs):
     return self._build_and_run(filename, expected_output, **kwargs)
 
-  ## Just like `do_run` but with filename of expected output
-  def do_run_from_file(self, filename, expected_output_filename, **kwargs):
-    return self._build_and_run(filename, read_file(expected_output_filename), **kwargs)
-
-  def do_run_in_out_file_test(self, *path, **kwargs):
-    srcfile = test_file(*path)
+  def do_run_in_out_file_test(self, srcfile, **kwargs):
+    if not os.path.exists(srcfile):
+      srcfile = test_file(srcfile)
     out_suffix = kwargs.pop('out_suffix', '')
     outfile = shared.unsuffixed(srcfile) + out_suffix + '.out'
     if EMTEST_REBASELINE:
@@ -1653,7 +1652,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       '-Wno-pointer-bool-conversion',
       '-Wno-shift-negative-value',
       '-Wno-gnu-offsetof-extensions',
-      # And becuase gnu-offsetof-extensions is a new warning:
+      # And because gnu-offsetof-extensions is a new warning:
       '-Wno-unknown-warning-option',
     ]
     return self.get_library(os.path.join('third_party', 'freetype'),
@@ -1862,7 +1861,7 @@ class Reporting(Enum):
   NONE = 0
   # Include the JS helpers for reporting results
   JS_ONLY = 1
-  # Include C/C++ reporting code (REPORT_RESULT mactros) as well as JS helpers
+  # Include C/C++ reporting code (REPORT_RESULT macros) as well as JS helpers
   FULL = 2
 
 
@@ -1881,13 +1880,14 @@ class BrowserCore(RunnerCore):
   @classmethod
   def browser_restart(cls):
     # Kill existing browser
-    logger.info("Restarting browser process")
+    logger.info('Restarting browser process')
     cls.browser_proc.terminate()
     # If the browser doesn't shut down gracefully (in response to SIGTERM)
     # after 2 seconds kill it with force (SIGKILL).
     try:
       cls.browser_proc.wait(2)
     except subprocess.TimeoutExpired:
+      logger.info('Browser did not respond to `terminate`.  Using `kill`')
       cls.browser_proc.kill()
       cls.browser_proc.wait()
     cls.browser_open(cls.harness_url)

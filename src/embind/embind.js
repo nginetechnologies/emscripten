@@ -38,7 +38,25 @@ var LibraryEmbind = {
 #if EMBIND_AOT
   $InvokerFunctions: '<<< EMBIND_AOT_OUTPUT >>>',
 #endif
+  // If register_type is used, emval will be registered multiple times for
+  // different type id's, but only a single type object is needed on the JS side
+  // for all of them. Store the type for reuse.
+  $EmValType__deps: ['_emval_decref', '$Emval', '$simpleReadValueFromPointer', '$GenericWireTypeSize'],
+  $EmValType: `{
+    name: 'emscripten::val',
+    'fromWireType': (handle) => {
+      var rv = Emval.toValue(handle);
+      __emval_decref(handle);
+      return rv;
+    },
+    'toWireType': (destructors, value) => Emval.toHandle(value),
+    'argPackAdvance': GenericWireTypeSize,
+    'readValueFromPointer': simpleReadValueFromPointer,
+    destructorFunction: null, // This type does not need a destructor
 
+    // TODO: do we need a deleteObject here?  write a test where
+    // emval is passed into JS via an interface
+  }`,
   $init_embind__deps: [
     '$getInheritedInstanceCount', '$getLiveInheritedInstances',
     '$flushPendingDeletes', '$setDelayFunction'],
@@ -175,7 +193,7 @@ var LibraryEmbind = {
   }),
   // All browsers that support WebAssembly also support configurable function name,
   // but we might be building for very old browsers via WASM2JS.
-#if MIN_CHROME_VERSION < 43 || MIN_EDGE_VERSION < 14 || MIN_SAFARI_VERSION < 100101 || MIN_FIREFOX_VERSION < 38
+#if MIN_CHROME_VERSION < 43 || MIN_SAFARI_VERSION < 100101 || MIN_FIREFOX_VERSION < 38
   // In that case, check if configurable function name is supported at init time
   // and, if not, replace with a fallback that returns function as-is as those browsers
   // don't support other methods either.
@@ -432,9 +450,14 @@ var LibraryEmbind = {
         if (typeof value != "bigint" && typeof value != "number") {
           throw new TypeError(`Cannot convert "${embindRepr(value)}" to ${this.name}`);
         }
+        if (typeof value == "number") {
+          value = BigInt(value);
+        }
+#if ASSERTIONS
         if (value < minRange || value > maxRange) {
           throw new TypeError(`Passing a number "${embindRepr(value)}" from JS side to C/C++ side to an argument of type "${name}", which is outside the valid range [${minRange}, ${maxRange}]!`);
         }
+#endif
         return value;
       },
       'argPackAdvance': GenericWireTypeSize,
@@ -551,7 +574,7 @@ var LibraryEmbind = {
           length = value.length;
         }
 
-        // assumes 4-byte alignment
+        // assumes POINTER_SIZE alignment
         var base = _malloc({{{ POINTER_SIZE }}} + length + 1);
         var ptr = base + {{{ POINTER_SIZE }}};
         {{{ makeSetValue('base', '0', 'length', SIZE_TYPE) }}};
@@ -616,10 +639,10 @@ var LibraryEmbind = {
         var HEAP = getHeap();
         var str;
 
-        var decodeStartPtr = value + 4;
+        var decodeStartPtr = value + {{{ POINTER_SIZE }}};
         // Looping here to support possible embedded '0' bytes
         for (var i = 0; i <= length; ++i) {
-          var currentBytePtr = value + 4 + i * charSize;
+          var currentBytePtr = value + {{{ POINTER_SIZE }}} + i * charSize;
           if (i == length || HEAP[currentBytePtr >> shift] == 0) {
             var maxReadBytes = currentBytePtr - decodeStartPtr;
             var stringSegment = decodeString(decodeStartPtr, maxReadBytes);
@@ -642,12 +665,12 @@ var LibraryEmbind = {
           throwBindingError(`Cannot pass non-string to C++ string type ${name}`);
         }
 
-        // assumes 4-byte alignment
+        // assumes POINTER_SIZE alignment
         var length = lengthBytesUTF(value);
-        var ptr = _malloc(4 + length + charSize);
-        HEAPU32[ptr >> 2] = length >> shift;
+        var ptr = _malloc({{{ POINTER_SIZE }}} + length + charSize);
+        {{{ makeSetValue('ptr', '0', 'length >> shift', SIZE_TYPE) }}};
 
-        encodeString(value, ptr + 4, length + charSize);
+        encodeString(value, ptr + {{{ POINTER_SIZE }}}, length + charSize);
 
         if (destructors !== null) {
           destructors.push(_free, ptr);
@@ -663,30 +686,17 @@ var LibraryEmbind = {
   },
 
   _embind_register_emval__deps: [
-    '_emval_decref', '$Emval',
-    '$readLatin1String', '$registerType', '$simpleReadValueFromPointer'],
-  _embind_register_emval: (rawType, name) => {
-    name = readLatin1String(name);
-    registerType(rawType, {
-      name,
-      'fromWireType': (handle) => {
-        var rv = Emval.toValue(handle);
-        __emval_decref(handle);
-        return rv;
-      },
-      'toWireType': (destructors, value) => Emval.toHandle(value),
-      'argPackAdvance': GenericWireTypeSize,
-      'readValueFromPointer': simpleReadValueFromPointer,
-      destructorFunction: null, // This type does not need a destructor
-
-      // TODO: do we need a deleteObject here?  write a test where
-      // emval is passed into JS via an interface
-    });
-  },
+    '$registerType',  '$EmValType'],
+  _embind_register_emval: (rawType) => registerType(rawType, EmValType),
 
   _embind_register_user_type__deps: ['_embind_register_emval'],
   _embind_register_user_type: (rawType, name) => {
-    __embind_register_emval(rawType, name);
+    __embind_register_emval(rawType);
+  },
+
+  _embind_register_optional__deps: ['_embind_register_emval'],
+  _embind_register_optional: (rawOptionalType, rawType) => {
+    __embind_register_emval(rawOptionalType);
   },
 
   _embind_register_memory_view__deps: ['$readLatin1String', '$registerType'],
@@ -1187,7 +1197,7 @@ var LibraryEmbind = {
       }
     }
 
-    if (!handle.$$) {
+    if (!handle || !handle.$$) {
       throwBindingError(`Cannot pass "${embindRepr(handle)}" as a ${this.name}`);
     }
     if (!handle.$$.ptr) {
@@ -1307,17 +1317,10 @@ var LibraryEmbind = {
         return ptr;
       },
       destructor(ptr) {
-        if (this.rawDestructor) {
-          this.rawDestructor(ptr);
-        }
+        this.rawDestructor?.(ptr);
       },
       'argPackAdvance': GenericWireTypeSize,
       'readValueFromPointer': readPointer,
-      'deleteObject'(handle) {
-        if (handle !== null) {
-          handle['delete']();
-        }
-      },
       'fromWireType': RegisteredPointer_fromWireType,
     });
   },
@@ -1550,7 +1553,8 @@ var LibraryEmbind = {
     record.count = { value: 1 };
     return attachFinalizer(Object.create(prototype, {
       $$: {
-          value: record,
+        value: record,
+        writable: true,
       },
     }));
   },
@@ -1743,12 +1747,8 @@ var LibraryEmbind = {
                            rawDestructor) => {
     name = readLatin1String(name);
     getActualType = embind__requireFunction(getActualTypeSignature, getActualType);
-    if (upcast) {
-      upcast = embind__requireFunction(upcastSignature, upcast);
-    }
-    if (downcast) {
-      downcast = embind__requireFunction(downcastSignature, downcast);
-    }
+    upcast &&= embind__requireFunction(upcastSignature, upcast);
+    downcast &&= embind__requireFunction(downcastSignature, downcast);
     rawDestructor = embind__requireFunction(destructorSignature, rawDestructor);
     var legalFunctionName = makeLegalFunctionName(name);
 
@@ -1803,9 +1803,7 @@ var LibraryEmbind = {
 
         if (registeredClass.baseClass) {
           // Keep track of class hierarchy. Used to allow sub-classes to inherit class functions.
-          if (registeredClass.baseClass.__derivedClasses === undefined) {
-            registeredClass.baseClass.__derivedClasses = [];
-          }
+          registeredClass.baseClass.__derivedClasses ??= [];
 
           registeredClass.baseClass.__derivedClasses.push(registeredClass);
         }

@@ -142,11 +142,13 @@ class sanity(RunnerCore):
   def check_working(self, command, expected=None):
     if type(command) is not list:
       command = [command]
+    if command == [EMCC]:
+      command = [EMCC, '--version']
     if expected is None:
       if command[0] == EMCC or (len(command) >= 2 and command[1] == EMCC):
-        expected = 'no input files'
+        expected = 'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld)'
       else:
-        expected = "could not find the following tests: blahblah"
+        expected = 'could not find the following tests: blahblah'
 
     output = self.do(command)
     self.assertContained(expected, output)
@@ -216,7 +218,7 @@ class sanity(RunnerCore):
           output = self.do(command)
 
           if 'blah' in settings:
-            self.assertContained('Error in evaluating config file (%s)' % default_config, output)
+            self.assertContained('error: error in evaluating config file (%s)' % default_config, output)
           elif 'runner' not in ' '.join(command):
             self.assertContained('error: NODE_JS is set to empty value', output) # sanity check should fail
         finally:
@@ -360,7 +362,7 @@ fi
     with env_modify({'EM_CONFIG': get_basic_config()}):
       out = self.expect_fail([EMCC, 'main.cpp', '-Wno-deprecated', '-o', 'a.out.js'])
 
-    self.assertContained('error: Inline EM_CONFIG data no longer supported.  Please use a config file.', out)
+    self.assertContained('error: inline EM_CONFIG data no longer supported.  Please use a config file.', out)
 
   def clear_cache(self):
     self.run_process([EMCC, '--clear-cache'])
@@ -755,7 +757,7 @@ fi
     # Touching package.json should cause compiler to fail with bootstrap message
     Path(utils.path_from_root('package.json')).touch()
     err = self.expect_fail([EMCC, test_file('hello_world.c')])
-    self.assertContained('emcc: error: emscripten setup is not complete ("npm packages" is out-of-date). Run bootstrap.py to update', err)
+    self.assertContained('emcc: error: emscripten setup is not complete ("npm packages" is out-of-date). Run `bootstrap` to update', err)
 
     # Running bootstrap.py should fix that
     bootstrap = shared.bat_suffix(shared.path_from_root('bootstrap'))

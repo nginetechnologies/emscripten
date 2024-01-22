@@ -6,7 +6,15 @@
 
 var LibraryGLEmulation = {
   // GL emulation: provides misc. functionality not present in OpenGL ES 2.0 or WebGL
-  $GLEmulation__deps: ['$GLImmediateSetup', 'glEnable', 'glDisable', 'glIsEnabled', 'glGetBooleanv', 'glGetIntegerv', 'glGetString', 'glCreateShader', 'glShaderSource', 'glCompileShader', 'glAttachShader', 'glDetachShader', 'glUseProgram', 'glDeleteProgram', 'glBindAttribLocation', 'glLinkProgram', 'glBindBuffer', 'glGetFloatv', 'glHint', 'glEnableVertexAttribArray', 'glDisableVertexAttribArray', 'glVertexAttribPointer', 'glActiveTexture', '$stringToNewUTF8', '$ptrToString'],
+  $GLEmulation__deps: ['$GLImmediateSetup', 'glEnable', 'glDisable',
+    'glIsEnabled', 'glGetBooleanv', 'glGetIntegerv', 'glGetString',
+    'glCreateShader', 'glShaderSource', 'glCompileShader', 'glAttachShader',
+    'glDetachShader', 'glUseProgram', 'glDeleteProgram', 'glBindAttribLocation',
+    'glLinkProgram', 'glBindBuffer', 'glGetFloatv', 'glHint',
+    'glEnableVertexAttribArray', 'glDisableVertexAttribArray',
+    'glVertexAttribPointer', 'glActiveTexture', '$stringToNewUTF8',
+    '$ptrToString', '$getEmscriptenSupportedExtensions',
+  ],
   $GLEmulation__postset:
 #if MAYBE_CLOSURE_COMPILER
     // Forward declare GL functions that are overridden by GLEmulation here to appease Closure compiler.
@@ -182,7 +190,7 @@ var LibraryGLEmulation = {
       _glEnable = _emscripten_glEnable = (cap) => {
         // Clean up the renderer on any change to the rendering state. The optimization of
         // skipping renderer setup is aimed at the case of multiple glDraw* right after each other
-        if (GLImmediate.lastRenderer) GLImmediate.lastRenderer.cleanup();
+        GLImmediate.lastRenderer?.cleanup();
         if (cap == 0xB60 /* GL_FOG */) {
           if (GLEmulation.fogEnabled != true) {
             GLImmediate.currentRenderer = null; // Fog parameter is part of the FFP shader state, we must re-lookup the renderer to use.
@@ -231,7 +239,7 @@ var LibraryGLEmulation = {
 
       var glDisable = _glDisable;
       _glDisable = _emscripten_glDisable = (cap) => {
-        if (GLImmediate.lastRenderer) GLImmediate.lastRenderer.cleanup();
+        GLImmediate.lastRenderer?.cleanup();
         if (cap == 0xB60 /* GL_FOG */) {
           if (GLEmulation.fogEnabled != false) {
             GLImmediate.currentRenderer = null; // Fog parameter is part of the FFP shader state, we must re-lookup the renderer to use.
@@ -394,7 +402,7 @@ var LibraryGLEmulation = {
         if (GL.stringCache[name_]) return GL.stringCache[name_];
         switch (name_) {
           case 0x1F03 /* GL_EXTENSIONS */: // Add various extensions that we can support
-            var ret = stringToNewUTF8((GLctx.getSupportedExtensions() || []).join(' ') +
+            var ret = stringToNewUTF8(getEmscriptenSupportedExtensions(GLctx).join(' ') +
                    ' GL_EXT_texture_env_combine GL_ARB_texture_env_crossbar GL_ATI_texture_env_combine3 GL_NV_texture_env_combine4 GL_EXT_texture_env_dot3 GL_ARB_multitexture GL_ARB_vertex_buffer_object GL_EXT_framebuffer_object GL_ARB_vertex_program GL_ARB_fragment_program GL_ARB_shading_language_100 GL_ARB_shader_objects GL_ARB_vertex_shader GL_ARB_fragment_shader GL_ARB_texture_cube_map GL_EXT_draw_range_elements' +
                    (GL.currentContext.compressionExt ? ' GL_ARB_texture_compression GL_EXT_texture_compression_s3tc' : '') +
                    (GL.currentContext.anisotropicExt ? ' GL_EXT_texture_filter_anisotropic' : '')
@@ -559,7 +567,7 @@ var LibraryGLEmulation = {
       GL.programShaders = {};
       var glAttachShader = _glAttachShader;
       _glAttachShader = _emscripten_glAttachShader = (program, shader) => {
-        if (!GL.programShaders[program]) GL.programShaders[program] = [];
+        GL.programShaders[program] ||= [];
         GL.programShaders[program].push(shader);
         glAttachShader(program, shader);
       };
@@ -1998,16 +2006,14 @@ var LibraryGLEmulation = {
       var attrib = GLImmediate.clientAttributes[name];
       if (!attrib) {
         for (var i = 0; i <= name; i++) { // keep flat
-          if (!GLImmediate.clientAttributes[i]) {
-            GLImmediate.clientAttributes[i] = {
-              name,
-              size,
-              type,
-              stride,
-              pointer,
-              offset: 0
-            };
-          }
+          GLImmediate.clientAttributes[i] ||= {
+            name,
+            size,
+            type,
+            stride,
+            pointer,
+            offset: 0
+          };
         }
       } else {
         attrib.name = name;
@@ -2925,7 +2931,7 @@ var LibraryGLEmulation = {
 #if GL_ASSERTIONS
         warnOnce('Rendering from planar client-side vertex arrays. This is a very slow emulation path! Use interleaved vertex arrays for best performance.');
 #endif
-        if (!GLImmediate.restrideBuffer) GLImmediate.restrideBuffer = _malloc(GL.MAX_TEMP_BUFFER_SIZE);
+        GLImmediate.restrideBuffer ||= _malloc(GL.MAX_TEMP_BUFFER_SIZE);
         var start = GLImmediate.restrideBuffer;
         bytes = 0;
         // calculate restrided offsets and total size
@@ -3539,7 +3545,7 @@ var LibraryGLEmulation = {
   $emulGlBindVertexArray: (vao) => {
     // undo vao-related things, wipe the slate clean, both for vao of 0 or an actual vao
     GLEmulation.currentVao = null; // make sure the commands we run here are not recorded
-    if (GLImmediate.lastRenderer) GLImmediate.lastRenderer.cleanup();
+    GLImmediate.lastRenderer?.cleanup();
     _glBindBuffer(GLctx.ARRAY_BUFFER, 0); // XXX if one was there before we were bound?
     _glBindBuffer(GLctx.ELEMENT_ARRAY_BUFFER, 0);
     for (var vaa in GLEmulation.enabledVertexAttribArrays) {

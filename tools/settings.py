@@ -54,6 +54,27 @@ PORTS_SETTINGS = {
     'USE_SQLITE3',
 }
 
+# Subset of settings that apply only when generating JS
+JS_ONLY_SETTINGS = {
+    'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE',
+    'INCLUDE_FULL_LIBRARY',
+    'PROXY_TO_WORKER',
+    'PROXY_TO_WORKER_FILENAME',
+    'BUILD_AS_WORKER',
+    'STRICT_JS',
+    'SMALL_XHR_CHUNKS',
+    'HEADLESS',
+    'MODULARIZE',
+    'EXPORT_ES6',
+    'USE_ES6_IMPORT_META',
+    'EXPORT_NAME',
+    'DYNAMIC_EXECUTION',
+    'PTHREAD_POOL_SIZE',
+    'PTHREAD_POOL_SIZE_STRICT',
+    'PTHREAD_POOL_DELAY_LOAD',
+    'DEFAULT_PTHREAD_STACK_SIZE',
+}
+
 # Subset of settings that apply at compile time.
 # (Keep in sync with [compile] comments in settings.js)
 COMPILE_TIME_SETTINGS = {
@@ -207,7 +228,7 @@ class SettingsManager:
         exit_with_error('legacy setting used in strict mode: %s', name)
       fixed_values, error_message = self.legacy_settings[name]
       if fixed_values and value not in fixed_values:
-        exit_with_error('Invalid command line option -s ' + name + '=' + str(value) + ': ' + error_message)
+        exit_with_error(f'invalid command line setting `-s{name}={value}`: {error_message}')
       diagnostics.warning('legacy-settings', 'use of legacy setting: %s (%s)', name, error_message)
 
     if name in self.alt_names:

@@ -44,7 +44,7 @@ var Module = typeof {{{ EXPORT_NAME }}} != 'undefined' ? {{{ EXPORT_NAME }}} : {
 #endif // USE_CLOSURE_COMPILER
 
 #if POLYFILL
-#if ((MAYBE_WASM2JS && WASM != 2) || MODULARIZE) && (MIN_CHROME_VERSION < 33 || MIN_EDGE_VERSION < 12 || MIN_FIREFOX_VERSION < 29 || MIN_IE_VERSION != TARGET_NOT_SUPPORTED || MIN_SAFARI_VERSION < 80000)
+#if ((MAYBE_WASM2JS && WASM != 2) || MODULARIZE) && (MIN_CHROME_VERSION < 33 || MIN_FIREFOX_VERSION < 29 || MIN_SAFARI_VERSION < 80000)
 // Include a Promise polyfill for legacy browsers. This is needed either for
 // wasm2js, where we polyfill the wasm API which needs Promises, or when using
 // modularize which creates a Promise for when the module is ready.
@@ -52,7 +52,7 @@ var Module = typeof {{{ EXPORT_NAME }}} != 'undefined' ? {{{ EXPORT_NAME }}} : {
 #include "polyfill/promise.js"
 #endif
 
-#if MIN_CHROME_VERSION < 45 || MIN_EDGE_VERSION < 12 || MIN_FIREFOX_VERSION < 34 || MIN_IE_VERSION != TARGET_NOT_SUPPORTED || MIN_SAFARI_VERSION < 90000
+#if MIN_CHROME_VERSION < 45 || MIN_FIREFOX_VERSION < 34 || MIN_SAFARI_VERSION < 90000
 // See https://caniuse.com/mdn-javascript_builtins_object_assign
 #include "polyfill/objassign.js"
 #endif
@@ -262,17 +262,8 @@ if (ENVIRONMENT_IS_NODE) {
     throw toThrow;
   };
 
-  Module['inspect'] = () => '[Emscripten Module object]';
-
 #if PTHREADS || WASM_WORKERS
-  let nodeWorkerThreads;
-  try {
-    nodeWorkerThreads = require('worker_threads');
-  } catch (e) {
-    console.error('The "worker_threads" module is not supported in this node.js build - perhaps a newer version is needed?');
-    throw e;
-  }
-  global.Worker = nodeWorkerThreads.Worker;
+  global.Worker = require('worker_threads').Worker;
 #endif
 
 #if WASM == 2

@@ -24,7 +24,7 @@ LibraryJSEventLoop = {
   // Just like setImmediate but returns an i32 that can be passed back
   // to wasm rather than a JS object.
   $setImmediateWrapped: (func) => {
-    if (!setImmediateWrapped.mapping) setImmediateWrapped.mapping = [];
+    setImmediateWrapped.mapping ||= [];
     var id = setImmediateWrapped.mapping.length;
     setImmediateWrapped.mapping[id] = setImmediate(() => {
       setImmediateWrapped.mapping[id] = undefined;
@@ -114,7 +114,7 @@ LibraryJSEventLoop = {
   emscripten_set_timeout: (cb, msecs, userData) =>
     safeSetTimeout(() => {{{ makeDynCall('vp', 'cb') }}}(userData), msecs),
 
-  emscripten_clear_timeout: (id) => clearTimeout(id),
+  emscripten_clear_timeout: 'clearTimeout',
 
   emscripten_set_timeout_loop__deps: ['$callUserCallback', 'emscripten_get_now'],
   emscripten_set_timeout_loop: (cb, msecs, userData) => {
