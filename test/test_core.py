@@ -1368,6 +1368,8 @@ int main(int argc, char **argv) {
 
   @with_both_eh_sjlj
   def test_exceptions_primary(self):
+    if '-fsanitize=leak' in self.emcc_args and '-fwasm-exceptions' in self.emcc_args:
+      self.skipTest('https://github.com/emscripten-core/emscripten/issues/21124')
     self.do_core_test('test_exceptions_primary.cpp')
 
   @with_both_eh_sjlj
@@ -1384,6 +1386,8 @@ int main(int argc, char **argv) {
 
   @with_both_eh_sjlj
   def test_exceptions_multiple_inherit_rethrow(self):
+    if '-fsanitize=leak' in self.emcc_args and '-fwasm-exceptions' in self.emcc_args:
+      self.skipTest('https://github.com/emscripten-core/emscripten/issues/21124')
     self.do_core_test('test_exceptions_multiple_inherit_rethrow.cpp')
 
   @with_both_eh_sjlj
@@ -6098,7 +6102,7 @@ Module.onRuntimeInitialized = () => {
     self.do_core_test('test_unary_literal.cpp')
 
   @crossplatform
-  # Explictly set LANG here since new versions of node expose
+  # Explicitly set LANG here since new versions of node expose
   # `navigator.languages` which emscripten will honor and we
   # want the test output to be consistent.
   @with_env_modify({'LANG': 'en_US.UTF-8'})
@@ -6106,7 +6110,7 @@ Module.onRuntimeInitialized = () => {
     self.do_core_test('test_env.c', regex=True)
 
   @crossplatform
-  # Explictly set LANG here since new versions of node expose
+  # Explicitly set LANG here since new versions of node expose
   # `navigator.languages` which emscripten will honor and we
   # want the test output to be consistent.
   @with_env_modify({'LANG': 'en_US.UTF-8'})
@@ -9102,7 +9106,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     # works with pthreads (even though we did not specify 'node,worker')
     self.set_setting('ENVIRONMENT', 'node')
     self.set_setting('STRICT_JS')
-    self.do_run_in_out_file_test('core/pthread/create.cpp')
+    self.do_run_in_out_file_test('core/pthread/create.c')
 
   @node_pthreads
   @parameterized({
@@ -9149,7 +9153,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('PTHREAD_POOL_SIZE', 2)
     self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['-DALLOW_SYNC']
-    self.do_run_in_out_file_test('core/pthread/create.cpp')
+    self.do_run_in_out_file_test('core/pthread/create.c')
 
   @node_pthreads
   def test_pthread_create_proxy(self):
@@ -9157,7 +9161,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('PROXY_TO_PTHREAD')
     self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['-DALLOW_SYNC']
-    self.do_run_in_out_file_test('core/pthread/create.cpp')
+    self.do_run_in_out_file_test('core/pthread/create.c')
 
   @node_pthreads
   def test_pthread_create_embind_stack_check(self):
@@ -9165,7 +9169,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('STACK_OVERFLOW_CHECK', 2)
     self.set_setting('EXIT_RUNTIME')
     self.emcc_args += ['-lembind']
-    self.do_run_in_out_file_test('core/pthread/create.cpp')
+    self.do_run_in_out_file_test('core/pthread/create.c', emcc_args=['-sDEFAULT_TO_CXX'])
 
   @node_pthreads
   def test_pthread_exceptions(self):

@@ -1240,24 +1240,24 @@ f.close()
 
   def test_commons_link(self):
     create_file('a.h', r'''
-#if !defined(A_H)
-#define A_H
-extern int foo[8];
-#endif
-''')
+      #if !defined(A_H)
+      #define A_H
+      extern int foo[8];
+      #endif
+    ''')
     create_file('a.c', r'''
-#include "a.h"
-int foo[8];
-''')
+      #include "a.h"
+      int foo[8];
+    ''')
     create_file('main.c', r'''
-#include <stdio.h>
-#include "a.h"
+      #include <stdio.h>
+      #include "a.h"
 
-int main() {
-    printf("|%d|\n", foo[0]);
-    return 0;
-}
-''')
+      int main() {
+        printf("|%d|\n", foo[0]);
+        return 0;
+      }
+    ''')
 
     self.run_process([EMCC, '-o', 'a.o', '-c', 'a.c'])
     self.run_process([EMAR, 'rv', 'library.a', 'a.o'])
@@ -1285,7 +1285,7 @@ int main() {
     create_file('foobar.c', 'int main(){ return 0; }')
     os.symlink('foobar.c', 'foobar.xxx')
     err = self.expect_fail([EMCC, 'foobar.xxx', '-o', 'foobar.js'])
-    self.assertContained('unknown file type: foobar.xxx', err)
+    self.assertContained(['unknown file type: foobar.xxx', "archive member 'native.o' is neither Wasm object file nor LLVM bitcode"], err)
 
   def test_multiply_defined_libsymbols(self):
     create_file('libA.c', 'int mult() { return 1; }')
@@ -1466,7 +1466,7 @@ int f() {
                      clang_native.get_clang_native_args())
     self.run_process([EMAR, 'crs', 'libfoo.a', 'native.o'])
     stderr = self.expect_fail([EMCC, 'main.c', 'libfoo.a'])
-    self.assertContained('unknown file type', stderr)
+    self.assertContained(['unknown file type', "libfoo.a: archive member 'native.o' is neither Wasm object file nor LLVM bitcode"], stderr)
 
   def test_export_all(self):
     lib = r'''
@@ -7388,7 +7388,7 @@ int main(int argc, char** argv) {
 
   def test_js_lib_native_deps_extra(self):
     # Similar to above but the JS symbol is not used by the native code.
-    # Instead is it explictly injected using `extraLibraryFuncs`.
+    # Instead is it explicitly injected using `extraLibraryFuncs`.
     create_file('lib.js', r'''
 addToLibrary({
   jsfunc__deps: ['raise'],
@@ -9133,12 +9133,8 @@ end
     self.run_process([EMCC, '-c', test_file('hello_world.c')])
     # The `S` flag means don't add an archive index
     self.run_process([EMAR, 'crS', 'libfoo.a', 'foo.o'])
-    # The llvm backend (link GNU ld and lld) doesn't support linking archives with no index.
-    # However we have logic that will automatically add indexes (unless running with
-    # NO_AUTO_ARCHIVE_INDEXES).
-    stderr = self.expect_fail([EMCC, '-sNO_AUTO_ARCHIVE_INDEXES', 'libfoo.a', 'hello_world.o'])
-    self.assertContained('libfoo.a: archive has no index; run ranlib to add one', stderr)
-    # The default behavior is to add archive indexes automatically.
+    # wasm-ld supports archive files without an index (unlike GNU ld) as of
+    # https://github.com/llvm/llvm-project/pull/78821
     self.run_process([EMCC, 'libfoo.a', 'hello_world.o'])
 
   def test_archive_non_objects(self):
@@ -14226,7 +14222,7 @@ w:0,t:0x[0-9a-fA-F]+: formatted: 42
   def test_no_minify(self):
     # Test that comments are preserved with `--minify=0` is used, even in `-Oz` builds.
     # This allows the output of emscripten to be run through the closure compiler as
-    # as a seperate build step.
+    # as a separate build step.
     create_file('pre.js', '''
     /**
      * This comment should be preserved

@@ -692,8 +692,6 @@ var LibraryWebGPU = {
 
   // Non-method functions
 
-  wgpuCreateInstance: (descriptor) => 1,
-
   wgpuGetInstanceFeatures: (featuresPtr) => {
     abort('TODO: wgpuGetInstanceFeatures unimplemented');
     return 0;
@@ -2410,9 +2408,6 @@ var LibraryWebGPU = {
   },
 
   // Instance
-
-  wgpuInstanceReference: (instance) => {}, // no-op
-  wgpuInstanceRelease: (instance) => {}, // no-op
 
   wgpuInstanceCreateSurface__deps: ['$findCanvasEventTarget'],
   wgpuInstanceCreateSurface: (instanceId, descriptor) => {
