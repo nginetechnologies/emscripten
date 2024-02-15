@@ -409,8 +409,9 @@ Print out exceptions in emscriptened code.
 DEMANGLE_SUPPORT
 ================
 
-If 1, build in libcxxabi's full c++ demangling code, to allow stackTrace()
-to emit fully proper demangled c++ names
+If 1, export `demangle` and `stackTrace` JS library functions.
+
+.. note:: This setting is deprecated
 
 .. _library_debug:
 
@@ -1467,7 +1468,6 @@ Changes enabled by this:
   - IGNORE_MISSING_MAIN is disabled.
   - AUTO_JS_LIBRARIES is disabled.
   - AUTO_NATIVE_LIBRARIES is disabled.
-  - AUTO_ARCHIVE_INDEXES is disabled.
   - DEFAULT_TO_CXX is disabled.
   - USE_GLFW is set to 0 rather than 2 by default.
   - ALLOW_UNIMPLEMENTED_SYSCALLS is disabled.
@@ -1484,16 +1484,6 @@ Allow program to link with or without ``main`` symbol.
 If this is disabled then one must provide a ``main`` symbol or explicitly
 opt out by passing ``--no-entry`` or an EXPORTED_FUNCTIONS list that doesn't
 include ``_main``.
-
-.. _auto_archive_indexes:
-
-AUTO_ARCHIVE_INDEXES
-====================
-
-Automatically attempt to add archive indexes at link time to archives that
-don't already have them.  This can happen when GNU ar or GNU ranlib is used
-rather than ``llvm-ar`` or ``emar`` since the former don't understand the wasm
-object format.
 
 .. _strict_js:
 
@@ -1631,7 +1621,9 @@ EXPORT_ES6
 ==========
 
 Export using an ES6 Module export rather than a UMD export.  MODULARIZE must
-be enabled for ES6 exports.
+be enabled for ES6 exports and is implicitly enabled if not already set.
+
+This is implicitly enabled if the output suffix is set to 'mjs'.
 
 .. _use_es6_import_meta:
 
@@ -1765,7 +1757,7 @@ the WASM_BIGINT option to avoid that problem by using BigInts for i64s which
 means we don't need to legalize for JS (but this requires a new enough JS
 VM).
 
-Standlone builds require a ``main`` entry point by default.  If you want to
+Standalone builds require a ``main`` entry point by default.  If you want to
 build a library (also known as a reactor) instead you can pass ``--no-entry``.
 
 .. _binaryen_ignore_implicit_traps:
@@ -1861,6 +1853,7 @@ Specify the SDL version that is being linked against.
 2 is a port of the SDL C code on emscripten-ports
 When AUTO_JS_LIBRARIES is set to 0 this defaults to 0 and SDL
 is not linked in.
+Alternate syntax for using the port: --use-port=sdl2
 
 .. note:: Applicable during both linking and compilation
 
@@ -1906,6 +1899,7 @@ USE_ICU
 =======
 
 1 = use icu from emscripten-ports
+Alternate syntax: --use-port=icu
 
 .. note:: Applicable during both linking and compilation
 
@@ -1915,6 +1909,7 @@ USE_ZLIB
 ========
 
 1 = use zlib from emscripten-ports
+Alternate syntax: --use-port=zlib
 
 .. note:: Applicable during both linking and compilation
 
@@ -1924,6 +1919,7 @@ USE_BZIP2
 =========
 
 1 = use bzip2 from emscripten-ports
+Alternate syntax: --use-port=bzip2
 
 .. note:: Applicable during both linking and compilation
 
@@ -1933,6 +1929,7 @@ USE_GIFLIB
 ==========
 
 1 = use giflib from emscripten-ports
+Alternate syntax: --use-port=giflib
 
 .. note:: Applicable during both linking and compilation
 
@@ -1942,6 +1939,7 @@ USE_LIBJPEG
 ===========
 
 1 = use libjpeg from emscripten-ports
+Alternate syntax: --use-port=libjpeg
 
 .. note:: Applicable during both linking and compilation
 
@@ -1951,6 +1949,7 @@ USE_LIBPNG
 ==========
 
 1 = use libpng from emscripten-ports
+Alternate syntax: --use-port=libpng
 
 .. note:: Applicable during both linking and compilation
 
@@ -1960,6 +1959,7 @@ USE_REGAL
 =========
 
 1 = use Regal from emscripten-ports
+Alternate syntax: --use-port=regal
 
 .. note:: Applicable during both linking and compilation
 
@@ -1969,6 +1969,7 @@ USE_BOOST_HEADERS
 =================
 
 1 = use Boost headers from emscripten-ports
+Alternate syntax: --use-port=boost_headers
 
 .. note:: Applicable during both linking and compilation
 
@@ -1978,6 +1979,7 @@ USE_BULLET
 ==========
 
 1 = use bullet from emscripten-ports
+Alternate syntax: --use-port=bullet
 
 .. note:: Applicable during both linking and compilation
 
@@ -1987,6 +1989,7 @@ USE_VORBIS
 ==========
 
 1 = use vorbis from emscripten-ports
+Alternate syntax: --use-port=vorbis
 
 .. note:: Applicable during both linking and compilation
 
@@ -1996,6 +1999,7 @@ USE_OGG
 =======
 
 1 = use ogg from emscripten-ports
+Alternate syntax: --use-port=ogg
 
 .. note:: Applicable during both linking and compilation
 
@@ -2005,6 +2009,7 @@ USE_MPG123
 ==========
 
 1 = use mpg123 from emscripten-ports
+Alternate syntax: --use-port=mpg123
 
 .. note:: Applicable during both linking and compilation
 
@@ -2014,6 +2019,7 @@ USE_FREETYPE
 ============
 
 1 = use freetype from emscripten-ports
+Alternate syntax: --use-port=freetype
 
 .. note:: Applicable during both linking and compilation
 
@@ -2033,6 +2039,7 @@ USE_HARFBUZZ
 ============
 
 1 = use harfbuzz from harfbuzz upstream
+Alternate syntax: --use-port=harfbuzz
 
 .. note:: Applicable during both linking and compilation
 
@@ -2042,6 +2049,7 @@ USE_COCOS2D
 ===========
 
 3 = use cocos2d v3 from emscripten-ports
+Alternate syntax: --use-port=cocos2d
 
 .. note:: Applicable during both linking and compilation
 
@@ -2051,6 +2059,7 @@ USE_MODPLUG
 ===========
 
 1 = use libmodplug from emscripten-ports
+Alternate syntax: --use-port=libmodplug
 
 .. note:: Applicable during both linking and compilation
 
@@ -2075,6 +2084,7 @@ USE_SQLITE3
 ===========
 
 1 = use sqlite3 from emscripten-ports
+Alternate syntax: --use-port=sqlite3
 
 .. note:: Applicable during both linking and compilation
 
@@ -2391,7 +2401,7 @@ AUTO_NATIVE_LIBRARIES
 =====================
 
 Like AUTO_JS_LIBRARIES but for the native libraries such as libgl, libal
-and libhtml5.   If this is disabled it is necessary to explcitly add
+and libhtml5.   If this is disabled it is necessary to explicitly add
 e.g. -lhtml5 and also to first build the library using ``embuilder``.
 
 .. _min_firefox_version:
@@ -2649,7 +2659,7 @@ When this flag is turned on, we error at link time if the build requires any
 changes to the wasm after link. This can be useful in testing, for example.
 Some example of features that require post-link wasm changes are:
 - Lowering i64 to i32 pairs at the JS boundary (See WASM_BIGINT)
-- Lowering sign-extnesion operation when targeting older browsers.
+- Lowering sign-extension operation when targeting older browsers.
 
 .. _abort_on_wasm_exceptions:
 
@@ -2678,7 +2688,7 @@ PURE_WASI
 
 Build binaries that use as many WASI APIs as possible, and include additional
 JS support libraries for those APIs.  This allows emscripten to produce binaries
-are more WASI compilant and also allows it to process and execute WASI
+are more WASI compliant and also allows it to process and execute WASI
 binaries built with other SDKs (e.g.  wasi-sdk).
 This setting is experimental and subject to change or removal.
 Implies STANDALONE_WASM.

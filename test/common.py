@@ -36,6 +36,7 @@ import jsrun
 from tools.shared import EMCC, EMXX, DEBUG, EMCONFIGURE, EMCMAKE
 from tools.shared import get_canonical_temp_dir, path_from_root
 from tools.utils import MACOS, WINDOWS, read_file, read_binary, write_binary, exit_with_error
+from tools.settings import COMPILE_TIME_SETTINGS
 from tools import shared, line_endings, building, config, utils
 
 logger = logging.getLogger('common')
@@ -226,7 +227,7 @@ def no_4gb(note):
 
     @wraps(f)
     def decorated(self, *args, **kwargs):
-      if self.get_setting('INITIAL_MEMORY') == '4200mb':
+      if self.is_4gb():
         self.skipTest(note)
       f(self, *args, **kwargs)
     return decorated
@@ -353,11 +354,11 @@ def with_env_modify(updates):
 def also_with_minimal_runtime(f):
   assert callable(f)
 
-  def metafunc(self, with_minimal_runtime):
+  def metafunc(self, with_minimal_runtime, *args, **kwargs):
     assert self.get_setting('MINIMAL_RUNTIME') is None
     if with_minimal_runtime:
       self.set_setting('MINIMAL_RUNTIME', 1)
-    f(self)
+    f(self, *args, **kwargs)
 
   metafunc._parameterize = {'': (False,),
                             'minimal_runtime': (True,)}
@@ -658,6 +659,12 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   def is_wasm64(self):
     return self.get_setting('MEMORY64')
 
+  def is_4gb(self):
+    return self.get_setting('INITIAL_MEMORY') == '4200mb'
+
+  def is_2gb(self):
+    return self.get_setting('INITIAL_MEMORY') == '2200mb'
+
   def check_dylink(self):
     if self.get_setting('ALLOW_MEMORY_GROWTH') == 1 and not self.is_wasm():
       self.skipTest('no dynamic linking with memory growth (without wasm)')
@@ -771,7 +778,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     # emcc warns about stack switching being experimental, and we build with
     # warnings-as-errors, so disable that warning
     self.emcc_args += ['-Wno-experimental']
-    self.emcc_args += ['-sASYNCIFY=2']
+    self.set_setting('ASYNCIFY', 2)
     if not self.is_wasm():
       self.skipTest('JSPI is not currently supported for WASM2JS')
 
@@ -838,6 +845,11 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     self.js_engines = config.JS_ENGINES.copy()
     self.settings_mods = {}
     self.emcc_args = ['-Wclosure', '-Werror', '-Wno-limited-postlink-optimizations']
+    # TODO(https://github.com/emscripten-core/emscripten/issues/11121)
+    # For historical reasons emcc compiles and links as C++ by default.
+    # However we want to run our tests in a more strict manner.  We can
+    # remove this if the issue above is ever fixed.
+    self.set_setting('NO_DEFAULT_TO_CXX')
     self.ldflags = []
     # Increate stack trace limit to maximise usefulness of test failure reports
     self.node_args = ['--stack-trace-limit=50']
@@ -959,9 +971,11 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   def clear_setting(self, key):
     self.settings_mods.pop(key, None)
 
-  def serialize_settings(self):
+  def serialize_settings(self, compile_only=False):
     ret = []
     for key, value in self.settings_mods.items():
+      if compile_only and key not in COMPILE_TIME_SETTINGS:
+        continue
       if value == 1:
         ret.append(f'-s{key}')
       elif type(value) is list:
@@ -995,15 +1009,15 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   # param @main_file whether this is the main file of the test. some arguments
   #                  (like --pre-js) do not need to be passed when building
   #                  libraries, for example
-  def get_emcc_args(self, main_file=False, ldflags=True):
+  def get_emcc_args(self, main_file=False, compile_only=False):
     def is_ldflag(f):
       return any(f.startswith(s) for s in ['-sENVIRONMENT=', '--pre-js=', '--post-js='])
 
-    args = self.serialize_settings() + self.emcc_args
-    if ldflags:
-      args += self.ldflags
-    else:
+    args = self.serialize_settings(compile_only) + self.emcc_args
+    if compile_only:
       args = [a for a in args if not is_ldflag(a)]
+    else:
+      args += self.ldflags
     if not main_file:
       for i, arg in enumerate(args):
         if arg in ('--pre-js', '--post-js'):
@@ -1039,12 +1053,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       filename = test_file(filename)
     suffix = '.js' if js_outfile else '.wasm'
     compiler = [compiler_for(filename, force_c)]
-    if compiler[0] == EMCC:
-      # TODO(https://github.com/emscripten-core/emscripten/issues/11121)
-      # For historical reasons emcc compiles and links as C++ by default.
-      # However we want to run our tests in a more strict manner.  We can
-      # remove this if the issue above is ever fixed.
-      compiler.append('-sNO_DEFAULT_TO_CXX')
 
     if force_c:
       assert shared.suffix(filename) != '.c', 'force_c is not needed for source files ending in .c'
@@ -1354,12 +1362,12 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
     build_dir = self.get_build_dir()
     output_dir = self.get_dir()
 
-    # get_library() is used to compile libraries, and not link executables,
-    # so we don't want to pass linker flags here (emscripten warns if you
-    # try to pass linker settings when compiling).
     emcc_args = []
     if not native:
-      emcc_args = self.get_emcc_args(ldflags=False)
+      # get_library() is used to compile libraries, and not link executables,
+      # so we don't want to pass linker flags here (emscripten warns if you
+      # try to pass linker settings when compiling).
+      emcc_args = self.get_emcc_args(compile_only=True)
 
     hash_input = (str(emcc_args) + ' $ ' + str(env_init)).encode('utf-8')
     cache_name = name + ','.join([opt for opt in emcc_args if len(opt) < 7]) + '_' + hashlib.md5(hash_input).hexdigest() + cache_name_extra
@@ -1408,7 +1416,7 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
         self.fail(f'subprocess exited with non-zero return code({e.returncode}): `{shared.shlex_join(cmd)}`')
 
   def emcc(self, filename, args=[], output_filename=None, **kwargs):  # noqa
-    cmd = [compiler_for(filename), filename] + self.get_emcc_args(ldflags='-c' not in args) + args
+    cmd = [compiler_for(filename), filename] + self.get_emcc_args(compile_only='-c' in args) + args
     if output_filename:
       cmd += ['-o', output_filename]
     self.run_process(cmd, **kwargs)
@@ -1662,10 +1670,6 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
   def get_poppler_library(self, env_init=None):
     freetype = self.get_freetype_library()
 
-    # The fontconfig symbols are all missing from the poppler build
-    # e.g. FcConfigSubstitute
-    self.set_setting('ERROR_ON_UNDEFINED_SYMBOLS', 0)
-
     self.emcc_args += [
       '-I' + test_file('third_party/freetype/include'),
       '-I' + test_file('third_party/poppler/include')
@@ -1681,6 +1685,9 @@ class RunnerCore(unittest.TestCase, metaclass=RunnerMeta):
       '-Wno-unknown-pragmas',
       '-Wno-shift-negative-value',
       '-Wno-dynamic-class-memaccess',
+      # The fontconfig symbols are all missing from the poppler build
+      # e.g. FcConfigSubstitute
+      '-sERROR_ON_UNDEFINED_SYMBOLS=0',
       # Avoid warning about ERROR_ON_UNDEFINED_SYMBOLS being used at compile time
       '-Wno-unused-command-line-argument',
       '-Wno-js-compiler',
@@ -1905,7 +1912,6 @@ class BrowserCore(RunnerCore):
   @classmethod
   def setUpClass(cls):
     super().setUpClass()
-    cls.also_wasm2js = int(os.getenv('EMTEST_BROWSER_ALSO_WASM2JS', '0')) == 1
     cls.port = int(os.getenv('EMTEST_BROWSER_PORT', '8888'))
     if not has_browser() or EMTEST_BROWSER == 'node':
       return
@@ -2111,24 +2117,26 @@ class BrowserCore(RunnerCore):
       setupRefTest();
 ''' % (reporting, basename, int(manually_trigger)))
 
-  def compile_btest(self, args, reporting=Reporting.FULL):
+  def compile_btest(self, filename, args, reporting=Reporting.FULL):
     # Inject support code for reporting results. This adds an include a header so testcases can
     # use REPORT_RESULT, and also adds a cpp file to be compiled alongside the testcase, which
     # contains the implementation of REPORT_RESULT (we can't just include that implementation in
     # the header as there may be multiple files being compiled here).
     if reporting != Reporting.NONE:
       # For basic reporting we inject JS helper funtions to report result back to server.
-      args += ['-DEMTEST_PORT_NUMBER=%d' % self.port,
-               '--pre-js', test_file('browser_reporting.js')]
+      args += ['--pre-js', test_file('browser_reporting.js')]
       if reporting == Reporting.FULL:
-        # If C reporting (i.e. REPORT_RESULT macro) is required
-        # also compile in report_result.c and forice-include report_result.h
-        args += ['-I' + TEST_ROOT,
-                 '-include', test_file('report_result.h'),
-                 test_file('report_result.c')]
+        # If C reporting (i.e. the REPORT_RESULT macro) is required we
+        # also include report_result.c and force-include report_result.h
+        self.run_process([EMCC, '-c', '-I' + TEST_ROOT,
+                          '-DEMTEST_PORT_NUMBER=%d' % self.port,
+                          test_file('report_result.c')] + self.get_emcc_args(compile_only=True))
+        args += ['report_result.o', '-include', test_file('report_result.h')]
     if EMTEST_BROWSER == 'node':
       args.append('-DEMTEST_NODE')
-    self.run_process([EMCC] + self.get_emcc_args() + args)
+    if not os.path.exists(filename):
+      filename = test_file(filename)
+    self.run_process([compiler_for(filename), filename] + self.get_emcc_args() + args)
 
   def btest_exit(self, filename, assert_returncode=0, *args, **kwargs):
     """Special case of btest that reports its result solely via exiting
@@ -2147,7 +2155,7 @@ class BrowserCore(RunnerCore):
   def btest(self, filename, expected=None, reference=None,
             reference_slack=0, manual_reference=None, post_build=None,
             args=None, also_proxied=False,
-            url_suffix='', timeout=None, also_wasm2js=False,
+            url_suffix='', timeout=None,
             manually_trigger_reftest=False, extra_tries=1,
             reporting=Reporting.FULL,
             output_basename='test'):
@@ -2171,10 +2179,10 @@ class BrowserCore(RunnerCore):
       # manual_reference only makes sense for reference tests
       assert manual_reference is None
     outfile = output_basename + '.html'
-    args += [filename, '-o', outfile]
+    args += ['-o', outfile]
     # print('all args:', args)
     utils.delete_file(outfile)
-    self.compile_btest(args, reporting=reporting)
+    self.compile_btest(filename, args, reporting=reporting)
     self.assertExists(outfile)
     if post_build:
       post_build()
@@ -2187,13 +2195,6 @@ class BrowserCore(RunnerCore):
       self.assertContained('RESULT: ' + expected[0], output)
     else:
       self.run_browser(outfile + url_suffix, expected=['/report_result?' + e for e in expected], timeout=timeout, extra_tries=extra_tries)
-
-    # Tests can opt into being run under wasmj2s as well
-    # Ignore this under MEMORY64 where wasm2js is not yet supported.
-    if 'WASM=0' not in original_args and (also_wasm2js or self.also_wasm2js) and not self.is_wasm64():
-      print('WASM=0')
-      self.btest(filename, expected, reference, reference_slack, manual_reference, post_build,
-                 original_args + ['-sWASM=0'], also_proxied=False, timeout=timeout)
 
     if also_proxied:
       print('proxied...')
