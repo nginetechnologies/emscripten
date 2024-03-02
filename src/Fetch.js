@@ -18,6 +18,12 @@ function startFetch(fetchHandle) {
   // response.
   {{{ runtimeKeepalivePush() }}}
 
+  var fetch_attr = fetchHandle + {{{ C_STRUCTS.emscripten_fetch_t.__attributes }}};
+  var onsuccess = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onsuccess }}} >> 2];
+  var onerror = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onerror }}} >> 2];
+  var onprogress = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onprogress }}} >> 2];
+  var onreadystatechange = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onreadystatechange }}} >> 2];
+
   var url = {{{ makeGetValue('fetchHandle', C_STRUCTS.emscripten_fetch_t.url, '*') }}};
   if (!url) {
     onerror(fetchHandle, undefined, 'no url specified!');
@@ -26,7 +32,6 @@ function startFetch(fetchHandle) {
   }
   var url_ = UTF8ToString(url);
 
-  var fetch_attr = fetchHandle + {{{ C_STRUCTS.emscripten_fetch_t.__attributes }}};
   var requestMethod = UTF8ToString(fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.requestMethod }}});
   requestMethod ||= 'GET';
   var timeoutMsecs = {{{ makeGetValue('fetch_attr', C_STRUCTS.emscripten_fetch_attr_t.timeoutMSecs, 'u32') }}};
@@ -80,11 +85,6 @@ function startFetch(fetchHandle) {
   const timeoutId = timeoutMsecs > 0 ? setTimeout(() => controller.abort(), timeoutMsecs) : -1;
 
   HEAPU16[fetchHandle + {{{ C_STRUCTS.emscripten_fetch_t.readyState }}} >> 1] = 0; // XMLHttpRequest UNSENT, kept for compatibility
-
-  var onsuccess = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onsuccess }}} >> 2];
-  var onerror = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onerror }}} >> 2];
-  var onprogress = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onprogress }}} >> 2];
-  var onreadystatechange = HEAPU32[fetch_attr + {{{ C_STRUCTS.emscripten_fetch_attr_t.onreadystatechange }}} >> 2];
 
   var fetchData = {};
   fetchData.controller = controller;
