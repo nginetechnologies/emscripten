@@ -307,7 +307,6 @@ var LibraryBrowser = {
 #if ASSERTIONS
         if (!useWebGL) assert(typeof GLctx == 'undefined', 'cannot set in module if GLctx is used, but we are a non-GL context that would replace it');
 #endif
-        
         Module.ctx = ctx;
         if (useWebGL) GL.makeContextCurrent(contextHandle);
         Module.useWebGL = useWebGL;
@@ -790,7 +789,6 @@ var LibraryBrowser = {
 #if ASSERTIONS
     assert(runDependencies === 0, 'async_load_script must be run when no other dependencies are active');
 #endif
-
     {{{ runtimeKeepalivePush() }}}
 
     var loadDone = () => {
@@ -920,7 +918,6 @@ var LibraryBrowser = {
 #if ASSERTIONS
     assert(!Browser.mainLoop.func, 'emscripten_set_main_loop: there can only be one main loop function at once: call emscripten_cancel_main_loop to cancel the previous one before setting a new one with different parameters.');
 #endif
-      
     Browser.mainLoop.func = browserIterationFunc;
     Browser.mainLoop.arg = arg;
 
