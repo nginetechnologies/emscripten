@@ -1063,7 +1063,7 @@ function implicitSelf() {
 
 function ENVIRONMENT_IS_MAIN_THREAD() {
   var envs = [];
-  if (USE_PTHREADS) envs.push('ENVIRONMENT_IS_PTHREAD');
+  if (PTHREADS) envs.push('ENVIRONMENT_IS_PTHREAD');
   if (WASM_WORKERS) envs.push('ENVIRONMENT_IS_WASM_WORKER');
   if (AUDIO_WORKLET) envs.push('ENVIRONMENT_IS_AUDIO_WORKLET');
   if (envs.length == 0) return 'true';
