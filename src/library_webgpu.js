@@ -1608,7 +1608,7 @@ var LibraryWebGPU = {
     var dataLayout = WebGPU.makeTextureDataLayout(dataLayoutPtr);
     var writeSize = WebGPU.makeExtent3D(writeSizePtr);
 #if PTHREADS
-    var subarray = HEAPU8.slice(data, data + size);
+    var subarray = HEAPU8.slice(data, data + dataSize);
 #else
     // This subarray isn't strictly necessary, but helps work around an issue
     // where Chromium makes a copy of the entire heap. crbug.com/1134457
