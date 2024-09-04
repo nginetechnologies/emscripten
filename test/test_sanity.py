@@ -15,7 +15,7 @@ from subprocess import PIPE, STDOUT
 
 from common import RunnerCore, path_from_root, env_modify, test_file
 from common import create_file, ensure_dir, make_executable, with_env_modify
-from common import parameterized, EMBUILDER
+from common import crossplatform, parameterized, EMBUILDER
 from tools.config import EM_CONFIG
 from tools.shared import EMCC
 from tools.shared import config
@@ -26,7 +26,7 @@ from tools import response_file
 from tools import ports
 
 SANITY_FILE = cache.get_path('sanity.txt')
-commands = [[EMCC], [path_from_root('test/runner'), 'blahblah']]
+commands = [[EMCC], [shared.bat_suffix(path_from_root('test/runner')), 'blahblah']]
 expected_llvm_version = str(shared.EXPECTED_LLVM_VERSION) + '.0.0'
 
 
@@ -156,6 +156,7 @@ class sanity(RunnerCore):
     return output
 
   # this should be the very first thing that runs. if this fails, everything else is irrelevant!
+  @crossplatform
   def test_aaa_normal(self):
     for command in commands:
       # Your existing EM_CONFIG should work!
@@ -550,20 +551,20 @@ fi
       self.assertNotExists(PORTS_DIR)
 
       # Building a file that doesn't need ports should not trigger anything
-      output = self.do([EMCC, test_file('hello_world_sdl.cpp')])
+      output = self.do([EMCC, test_file('hello_world_sdl.c')])
       self.assertNotContained(RETRIEVING_MESSAGE, output)
       self.assertNotContained(BUILDING_MESSAGE, output)
       self.assertNotExists(PORTS_DIR)
 
       def first_use():
-        output = self.do([EMCC, test_file('hello_world_sdl.cpp'), '-sUSE_SDL=2'])
+        output = self.do([EMCC, test_file('hello_world_sdl.c'), '-sUSE_SDL=2'])
         self.assertContained(RETRIEVING_MESSAGE, output)
         self.assertContained(BUILDING_MESSAGE, output)
         self.assertExists(PORTS_DIR)
 
       def second_use():
         # Using it again avoids retrieve and build
-        output = self.do([EMCC, test_file('hello_world_sdl.cpp'), '-sUSE_SDL=2'])
+        output = self.do([EMCC, test_file('hello_world_sdl.c'), '-sUSE_SDL=2'])
         self.assertNotContained(RETRIEVING_MESSAGE, output)
         self.assertNotContained(BUILDING_MESSAGE, output)
 

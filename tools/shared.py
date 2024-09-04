@@ -59,7 +59,7 @@ SKIP_SUBPROCS = False
 # This version currently matches the node version that we ship with emsdk
 # which means that we can say for sure that this version is well supported.
 MINIMUM_NODE_VERSION = (16, 20, 0)
-EXPECTED_LLVM_VERSION = 19
+EXPECTED_LLVM_VERSION = 20
 
 # These get set by setup_temp_dirs
 TEMP_DIR = None
@@ -397,8 +397,13 @@ def node_memory64_flags():
   return ['--experimental-wasm-memory64']
 
 
-def node_exception_flags():
-  return ['--experimental-wasm-eh']
+def node_exception_flags(nodejs):
+  node_version = get_node_version(nodejs)
+  # Exception handling was enabled by default in node v17.
+  if node_version and node_version < (17, 0, 0):
+    return ['--experimental-wasm-eh']
+  else:
+    return []
 
 
 def node_pthread_flags(nodejs):
@@ -666,10 +671,6 @@ def print_compiler_stage(cmd):
     sys.stderr.flush()
 
 
-def mangle_c_symbol_name(name):
-  return '_' + name if not name.startswith('$') else name[1:]
-
-
 def demangle_c_symbol_name(name):
   if not is_c_symbol(name):
     return '$' + name
@@ -677,15 +678,11 @@ def demangle_c_symbol_name(name):
 
 
 def is_c_symbol(name):
-  return name.startswith('_') or name in settings.WASM_SYSTEM_EXPORTS
+  return name.startswith('_')
 
 
 def treat_as_user_export(name):
-  if name.startswith('dynCall_'):
-    return False
-  if name in settings.WASM_SYSTEM_EXPORTS:
-    return False
-  return True
+  return not name.startswith('dynCall_')
 
 
 def asmjs_mangle(name):

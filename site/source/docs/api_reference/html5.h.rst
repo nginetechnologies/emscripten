@@ -419,13 +419,13 @@ Struct
   .. c:member:: long targetX
      long targetY
 
-    These fields give the mouse coordinates mapped relative to the coordinate space of the target DOM element receiving the input events (Emscripten-specific extension).
+    These fields give the mouse coordinates mapped relative to the coordinate space of the target DOM element receiving the input events (Emscripten-specific extension; coordinates are rounded down to the nearest integer).
 
 
   .. c:member:: long canvasX
      long canvasY
 
-    These fields give the mouse coordinates mapped to the Emscripten canvas client area (Emscripten-specific extension).
+    These fields give the mouse coordinates mapped to the Emscripten canvas client area (Emscripten-specific extension; coordinates are rounded down the nearest integer).
 
 
   .. c:member:: long padding
@@ -927,6 +927,10 @@ Defines
     Emscripten `orientationchange <https://w3c.github.io/screen-orientation/>`_ event.
 
 
+.. c:macro:: EMSCRIPTEN_ORIENTATION_UNKNOWN
+
+  Either the orientation API is not supported or the orientation type is not known.
+
 .. c:macro:: EMSCRIPTEN_ORIENTATION_PORTRAIT_PRIMARY
 
   Primary portrait mode orientation.
@@ -954,7 +958,7 @@ Struct
 
   .. c:member:: int orientationIndex
 
-    One of the :c:type:`EM_ORIENTATION_PORTRAIT_xxx <EMSCRIPTEN_ORIENTATION_PORTRAIT_PRIMARY>` fields, or -1 if unknown.
+    One of the :c:type:`EM_ORIENTATION_PORTRAIT_xxx <EMSCRIPTEN_ORIENTATION_PORTRAIT_PRIMARY>` fields, or :c:type:`EMSCRIPTEN_ORIENTATION_UNKNOWN` if unknown.
 
   .. c:member:: int orientationAngle
 

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-addToLibrary({
+legacyFuncs = {
   $ALLOC_NORMAL: 0,  // Tries to use _malloc()
   $ALLOC_STACK: 1,  // Lives for the duration of the current function call
 
@@ -17,7 +17,7 @@ addToLibrary({
    * @param {(Uint8Array|Array<number>)} slab: An array of data.
    * @param {number=} allocator : How to allocate memory, see ALLOC_*
    */
-  $allocate__deps: ['$ALLOC_NORMAL', '$ALLOC_STACK', 'malloc', 'stackAlloc'],
+  $allocate__deps: ['$ALLOC_NORMAL', '$ALLOC_STACK', 'malloc', '$stackAlloc'],
   $allocate: (slab, allocator) => {
     var ret;
   #if ASSERTIONS
@@ -120,4 +120,29 @@ addToLibrary({
     });
   },
 #endif
-});
+
+  $stackTrace__deps: ['$jsStackTrace'],
+  $stackTrace: function() {
+    var js = jsStackTrace();
+    if (Module['extraStackTrace']) js += '\n' + Module['extraStackTrace']();
+    return js;
+  },
+
+  // Legacy names for runtime `out`/`err` symbols.
+  $print: 'out',
+  $printErr: 'err',
+};
+
+if (WARN_DEPRECATED && !INCLUDE_FULL_LIBRARY) {
+  for (const name of Object.keys(legacyFuncs)) {
+    if (!isDecorator(name)) {
+      depsKey = `${name}__deps`;
+      legacyFuncs[depsKey] = legacyFuncs[depsKey] || [];
+      legacyFuncs[depsKey].push(() => {
+        warn(`JS library symbol '${name}' is deprecated. Please open a bug if you have a continuing need for this symbol [-Wdeprecated]`);
+      });
+    }
+  }
+}
+
+addToLibrary(legacyFuncs);
