@@ -35,7 +35,7 @@ var LibraryPThread = {
   $PThread__postset: 'PThread.init();',
   $PThread__deps: ['_emscripten_thread_init',
                    '$terminateWorker',
-                   '$cleanupThread', '$zeroMemory',
+                   '$cleanupThread',
 #if MAIN_MODULE
                    '$markAsFinished',
 #endif
@@ -75,7 +75,7 @@ var LibraryPThread = {
         ) {
           t = _pthread_self();
         }
-        return 'w:' + workerID + ',t:' + ptrToString(t) + ': ';
+        return `w:${workerID},t:${ptrToString(t)}: `;
       }
 
       // Prefix all err()/dbg() messages with the calling thread ID.
@@ -94,8 +94,6 @@ var LibraryPThread = {
 #endif
       if ({{{ ENVIRONMENT_IS_MAIN_THREAD() }}}) {
         PThread.initMainThread();
-      } else {
-        PThread.initWorker();
       }
     },
     initMainThread() {
@@ -119,19 +117,6 @@ var LibraryPThread = {
       // Finished threads are threads that have finished running but we not yet
       // joined.
       PThread.finishedThreads = new Set();
-#endif
-    },
-
-    initWorker() {
-#if isSymbolNeeded('$noExitRuntime')
-      // The default behaviour for pthreads is always to exit once they return
-      // from their entry point (or call pthread_exit).  If we set noExitRuntime
-      // to true here on pthreads they would never complete and attempt to
-      // pthread_join to them would block forever.
-      // pthreads can still choose to set `noExitRuntime` explicitly, or
-      // call emscripten_unwind_to_js_event_loop to extend their lifetime beyond
-      // their main function.  See comment in src/runtime_pthread.js for more.
-      noExitRuntime = false;
 #endif
     },
 
@@ -426,7 +411,7 @@ var LibraryPThread = {
 #if EXPORT_ES6 && USE_ES6_IMPORT_META
       // If we're using module output, use bundler-friendly pattern.
 #if PTHREADS_DEBUG
-      dbg('Allocating a new web worker from ' + import.meta.url);
+      dbg(`Allocating a new web worker from ${import.meta.url}`);
 #endif
 #if TRUSTED_TYPES
       // Use Trusted Types compatible wrappers.
@@ -738,10 +723,10 @@ var LibraryPThread = {
 #endif
 
     var offscreenCanvases = {}; // Dictionary of OffscreenCanvas objects we'll transfer to the created thread to own
-    var moduleCanvasId = Module['canvas'] ? Module['canvas'].id : '';
+    var moduleCanvasId = Module['canvas']?.id || '';
     // Note that transferredCanvasNames might be null (so we cannot do a for-of loop).
-    for (var i in transferredCanvasNames) {
-      var name = transferredCanvasNames[i].trim();
+    for (var name of transferredCanvasNames) {
+      name = name.trim();
       var offscreenCanvasInfo;
       try {
         if (name == '#canvas') {
@@ -773,7 +758,7 @@ var LibraryPThread = {
           }
           if (canvas.transferControlToOffscreen) {
 #if GL_DEBUG
-            dbg('pthread_create: canvas.transferControlToOffscreen(), transferring canvas by name "' + name + '" (DOM id="' + canvas.id + '") from main thread to pthread');
+            dbg(`pthread_create: canvas.transferControlToOffscreen(), transferring canvas by name "${name}" (DOM id="${canvas.id}") from main thread to pthread`);
 #endif
             // Create a shared information block in heap so that we can control
             // the canvas size from any thread.
@@ -1066,6 +1051,16 @@ var LibraryPThread = {
     // `runtimeKeepaliveCounter` to zero. Reset it now so the new thread won't
     // be affected.
     runtimeKeepaliveCounter = 0;
+
+#if isSymbolNeeded('$noExitRuntime')
+    // Same for noExitRuntime.  The default for pthreads should always be false
+    // otherwise pthreads would never complete and attempts to pthread_join to
+    // them would block forever.
+    // pthreads can still choose to set `noExitRuntime` explicitly, or
+    // call emscripten_unwind_to_js_event_loop to extend their lifetime beyond
+    // their main function.  See comment in src/runtime_pthread.js for more.
+    noExitRuntime = 0;
+#endif
 #endif
 
 #if MAIN_MODULE

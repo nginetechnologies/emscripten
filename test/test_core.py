@@ -20,7 +20,7 @@ if __name__ == '__main__':
 from tools.shared import PIPE
 from tools.shared import EMCC, EMAR, FILE_PACKAGER
 from tools.utils import WINDOWS, MACOS, write_file, delete_file
-from tools import shared, building, config, webassembly
+from tools import shared, building, config, utils, webassembly
 import common
 from common import RunnerCore, path_from_root, requires_native_clang, test_file, create_file
 from common import skip_if, no_windows, no_mac, is_slow_test, parameterized, parameterize
@@ -876,7 +876,7 @@ base align: 0, 0, 0, 0'''])
     # Emscripten SjLj with and without Emscripten EH support
     self.set_setting('SUPPORT_LONGJMP', 'emscripten')
     self.set_setting('DEFAULT_TO_CXX') # See comments on @with_all_eh_sjlj
-    for disable_catching in [0, 1]:
+    for disable_catching in (0, 1):
       self.set_setting('DISABLE_EXCEPTION_CATCHING', disable_catching)
       self.do_core_test('test_longjmp.c')
     # Wasm SjLj with and without Wasm EH support
@@ -888,7 +888,7 @@ base align: 0, 0, 0, 0'''])
     if '-fsanitize=address' in self.emcc_args:
       self.skipTest('Wasm EH does not work with asan yet')
     self.emcc_args.append('-fwasm-exceptions')
-    for arg in ['-fwasm-exceptions', '-fno-exceptions']:
+    for arg in ('-fwasm-exceptions', '-fno-exceptions'):
       self.do_core_test('test_longjmp.c', emcc_args=[arg])
     # Wasm SjLj with and with new EH (exnref) support
     self.set_setting('WASM_EXNREF')
@@ -931,7 +931,7 @@ base align: 0, 0, 0, 0'''])
     self.do_core_test('test_longjmp_exc.c', assert_returncode=NON_ZERO)
 
   def test_longjmp_throw(self):
-    for disable_throw in [0, 1]:
+    for disable_throw in (0, 1):
       print(disable_throw)
       self.set_setting('DISABLE_EXCEPTION_CATCHING', disable_throw)
       self.do_core_test('test_longjmp_throw.cpp')
@@ -962,7 +962,7 @@ base align: 0, 0, 0, 0'''])
         return 0;
       }
     '''
-    for num in [1, 5, 20, 1000]:
+    for num in (1, 5, 20, 1000):
       print('NUM=%d' % num)
       self.do_run(src.replace('NUM', str(num)), '0\n' * num)
 
@@ -1015,7 +1015,7 @@ int main()
     self.maybe_closure()
     # Emscripten EH with and without Emscripten SjLj support
     self.set_setting('DISABLE_EXCEPTION_CATCHING', 0)
-    for support_longjmp in [0, 'emscripten']:
+    for support_longjmp in (0, 'emscripten'):
       self.set_setting('SUPPORT_LONGJMP', support_longjmp)
       self.do_run_in_out_file_test('core/test_exceptions.cpp', out_suffix='_caught')
     # Wasm EH with and without Wasm SjLj support
@@ -1026,18 +1026,18 @@ int main()
     if '-fsanitize=address' in self.emcc_args:
       self.skipTest('Wasm EH does not work with asan yet')
     self.emcc_args.append('-fwasm-exceptions')
-    for support_longjmp in [0, 'wasm']:
+    for support_longjmp in (0, 'wasm'):
       self.set_setting('SUPPORT_LONGJMP', support_longjmp)
       self.do_run_in_out_file_test('core/test_exceptions.cpp', out_suffix='_caught')
     # Wasm new EH (exnref) with and without Wasm SjLj support
     self.set_setting('WASM_EXNREF')
-    for support_longjmp in [0, 'wasm']:
+    for support_longjmp in (0, 'wasm'):
       self.set_setting('SUPPORT_LONGJMP', support_longjmp)
       self.do_run_in_out_file_test('core/test_exceptions.cpp', out_suffix='_caught')
 
   def test_exceptions_off(self):
     self.set_setting('DISABLE_EXCEPTION_CATCHING')
-    for support_longjmp in [0, 1]:
+    for support_longjmp in (0, 1):
       self.set_setting('SUPPORT_LONGJMP', support_longjmp)
       self.do_runf('core/test_exceptions.cpp', assert_returncode=NON_ZERO)
 
@@ -1047,7 +1047,7 @@ int main()
     self.maybe_closure()
     self.set_setting('MINIMAL_RUNTIME')
     self.emcc_args += ['--pre-js', test_file('minimal_runtime_exit_handling.js')]
-    for support_longjmp in [0, 1]:
+    for support_longjmp in (0, 1):
       self.set_setting('SUPPORT_LONGJMP', support_longjmp)
 
       self.set_setting('DISABLE_EXCEPTION_CATCHING', 0)
@@ -1102,7 +1102,7 @@ int main()
 
   @with_all_eh_sjlj
   def test_exceptions_2(self):
-    for safe in [0, 1]:
+    for safe in (0, 1):
       print(safe)
       if safe and '-fsanitize=address' in self.emcc_args:
         # Can't use safe heap with ASan
@@ -1632,7 +1632,7 @@ int main() {
   def test_segfault(self):
     self.set_setting('SAFE_HEAP')
 
-    for addr in ['get_null()', 'new D2()']:
+    for addr in ('get_null()', 'new D2()'):
       print(addr)
       src = r'''
         #include <stdio.h>
@@ -1802,7 +1802,7 @@ int main() {
     self.do_runf(src, 'You must build with -sRETAIN_COMPILER_SETTINGS', assert_returncode=NON_ZERO)
     self.clear_setting('ASSERTIONS')
     self.set_setting('RETAIN_COMPILER_SETTINGS')
-    self.do_runf(src, read_file(output).replace('waka', shared.EMSCRIPTEN_VERSION))
+    self.do_runf(src, read_file(output).replace('waka', utils.EMSCRIPTEN_VERSION))
 
   def test_emscripten_has_asyncify(self):
     src = r'''
@@ -1943,9 +1943,7 @@ int main(int argc, char **argv) {
   def test_em_js(self, args, force_c):
     if '-sMAIN_MODULE=2' in args:
       self.check_dylink()
-    else:
-      self.emcc_args += ['-sEXPORTED_FUNCTIONS=_main,_malloc']
-    self.emcc_args += args
+    self.emcc_args += ['-sEXPORTED_FUNCTIONS=_main,_malloc'] + args
     if '-pthread' in args:
       self.setup_node_pthreads()
 
@@ -2470,10 +2468,7 @@ The current type of b is: 9
     if modularize:
       self.set_setting('MODULARIZE')
       self.set_setting('EXPORT_NAME=ModuleFactory')
-      # Only instantiate the module on the main thread.
-      create_file('extern-post.js',
-                  'if (typeof importScripts != "function") ModuleFactory();')
-      args = ['--extern-post-js=extern-post.js']
+      args = ['--extern-post-js', test_file('modularize_post_js.js')]
     self.do_run_in_out_file_test('pthread/test_pthread_proxying.c',
                                  interleaved_output=False, emcc_args=args)
 
@@ -5291,7 +5286,7 @@ Have even and odd!
 
   def test_sscanf_2(self):
     # doubles
-    for ftype in ['float', 'double']:
+    for ftype in ('float', 'double'):
       src = r'''
           #include <stdio.h>
 
@@ -5937,7 +5932,7 @@ Module.onRuntimeInitialized = () => {
   def test_unistd_access(self):
     self.uses_es6 = True
     orig_compiler_opts = self.emcc_args.copy()
-    for fs in ['MEMFS', 'NODEFS']:
+    for fs in ('MEMFS', 'NODEFS'):
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
       if self.get_setting('WASMFS'):
         if fs == 'NODEFS':
@@ -6089,7 +6084,7 @@ Module.onRuntimeInitialized = () => {
   @also_with_wasm_bigint
   def test_unistd_io(self):
     orig_compiler_opts = self.emcc_args.copy()
-    for fs in ['MEMFS', 'NODEFS']:
+    for fs in ('MEMFS', 'NODEFS'):
       self.clear()
       self.emcc_args = orig_compiler_opts + ['-D' + fs]
       if fs == 'NODEFS':
@@ -6268,8 +6263,7 @@ PORT: 3979
     err = self.expect_fail([PYTHON, 'expect_fail.py'], expect_traceback=True)
     self.assertContained('UnicodeDecodeError', err)
 
-    create_file('modularize_post.js', '(async function main(){await Module();})()')
-    self.emcc_args += ['-sMODULARIZE', '--js-library', test_file('unicode_library.js'), '--extern-post-js', 'modularize_post.js', '--post-js', test_file('unicode_postjs.js')]
+    self.emcc_args += ['-sMODULARIZE', '--js-library', test_file('unicode_library.js'), '--extern-post-js', test_file('modularize_post_js.js'), '--post-js', test_file('unicode_postjs.js')]
     self.do_run_in_out_file_test('test_unicode_js_library.c')
 
   def test_funcptr_import_type(self):
@@ -6921,7 +6915,7 @@ void* operator new(size_t size) {
     # (but without the specific output, as it is logging the actual locals
     # used and so forth, which will change between opt modes and updates of
     # llvm etc.)
-    for msg in ['log_execution', 'get_i32', 'set_i32', 'load_ptr', 'load_val', 'store_ptr', 'store_val']:
+    for msg in ('log_execution', 'get_i32', 'set_i32', 'load_ptr', 'load_val', 'store_ptr', 'store_val'):
       self.assertIn(msg, output)
 
   ### Integration tests
@@ -7926,14 +7920,13 @@ void* operator new(size_t size) {
   def test_modularize_closure_pre(self):
     # test that the combination of modularize + closure + pre-js works. in that mode,
     # closure should not minify the Module object in a way that the pre-js cannot use it.
-    create_file('post.js', 'var TheModule = Module();\n')
     if self.is_wasm2js():
       # TODO(sbc): Fix closure warnings with MODULARIZE + WASM=0
       self.ldflags.append('-Wno-error=closure')
 
     self.emcc_args += [
       '--pre-js', test_file('core/modularize_closure_pre.js'),
-      '--extern-post-js=post.js',
+      '--extern-post-js', test_file('modularize_post_js.js'),
       '--closure=1',
       '-g1',
       '-sMODULARIZE',
@@ -7975,25 +7968,29 @@ void* operator new(size_t size) {
         atexit(cleanup); // this atexit should still be called
         printf("hello, world!\n");
         // Unusual exit status to make sure it's working!
-        #ifdef CAPITAL_EXIT
-          _Exit(118);
+        #if defined(NORMAL_EXIT)
+          exit(117);
         #elif defined(UNDER_EXIT)
           _exit(118);
-        #elif defined(NORMAL_EXIT)
-          exit(118);
+        #elif defined(CAPITAL_EXIT)
+          _Exit(119);
         #endif
       }
     ''')
     create_file('pre.js', '''
-      Module.onExit = () => out('I see exit status: ' + EXITSTATUS);
+      Module.onExit = (status) => {
+        out('I see exit status: ' + status);
+        // The EXITSTATUS global should match what we are passed
+        assert(status == EXITSTATUS);
+      };
     ''')
     self.emcc_args += ['--pre-js', 'pre.js']
     print('.. exit')
-    self.do_runf('exit.c', 'hello, world!\ncleanup\nI see exit status: 118', assert_returncode=118, emcc_args=['-DNORMAL_EXIT'])
+    self.do_runf('exit.c', 'hello, world!\ncleanup\nI see exit status: 117', assert_returncode=117, emcc_args=['-DNORMAL_EXIT'])
     print('.. _exit')
     self.do_runf('exit.c', 'hello, world!\nI see exit status: 118', assert_returncode=118, emcc_args=['-DUNDER_EXIT'])
     print('.. _Exit')
-    self.do_runf('exit.c', 'hello, world!\nI see exit status: 118', assert_returncode=118, emcc_args=['-DCAPITAL_EXIT'])
+    self.do_runf('exit.c', 'hello, world!\nI see exit status: 119', assert_returncode=119, emcc_args=['-DCAPITAL_EXIT'])
 
   def test_minmax(self):
     self.do_runf('test_minmax.c', 'NAN != NAN\nSuccess!')
@@ -8713,7 +8710,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     # compiler.  lsan also pulls in $FS
     if '-fsanitize=leak' not in self.emcc_args and extra_setting != 'FORCE_FILESYSTEM':
       self.maybe_closure()
-    self.do_runf('hello_world.c', 'hello, world!')
+    self.do_run_in_out_file_test('hello_world.c')
 
   # Tests that -sMINIMAL_RUNTIME works well with SAFE_HEAP
   @no_wasmfs('https://github.com/emscripten-core/emscripten/issues/16816')
@@ -8748,11 +8745,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @no_lsan('-fsanitize-minimal-runtime cannot be used with LSan')
   def test_ubsan_minimal_too_many_errors(self):
     self.emcc_args += ['-fsanitize=undefined', '-fsanitize-minimal-runtime']
-    if self.is_wasm2js():
-      if self.is_optimizing():
-        self.skipTest('test can only be run without optimizations on asm.js')
-      # Need to use `-g` to get proper line numbers in asm.js
-      self.emcc_args += ['-g']
     self.do_runf('core/test_ubsan_minimal_too_many_errors.c',
                  expected_output='ubsan: add-overflow by 0x[0-9a-f]*\n' * 20 + 'ubsan: too many errors\n',
                  regex=True)
@@ -8762,11 +8754,6 @@ NODEFS is no longer included by default; build with -lnodefs.js
   @no_lsan('-fsanitize-minimal-runtime cannot be used with LSan')
   def test_ubsan_minimal_errors_same_place(self):
     self.emcc_args += ['-fsanitize=undefined', '-fsanitize-minimal-runtime']
-    if self.is_wasm2js():
-      if self.is_optimizing():
-        self.skipTest('test can only be run without optimizations under wasm2js')
-      # Need to use `-g` to get proper line numbers in wasm2js
-      self.emcc_args += ['-g']
     self.do_runf('core/test_ubsan_minimal_errors_same_place.c',
                  expected_output='ubsan: add-overflow by 0x[0-9a-z]*\n' * 5,
                  regex=True)
@@ -9021,7 +9008,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('USE_CLOSURE_COMPILER')
     self.set_setting('ALLOW_MEMORY_GROWTH')
     self.set_setting('INITIAL_MEMORY', '300mb')
-    self.do_runf('hello_world.c', expected_output='hello, world!')
+    self.do_run_in_out_file_test('hello_world.c')
 
   @no_asan('SAFE_HEAP cannot be used with ASan')
   @no_2gb('asan doesnt support GLOBAL_BASE')
@@ -9230,8 +9217,7 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.set_setting('USE_OFFSET_CONVERTER')
     self.set_setting('MODULARIZE')
     self.set_setting('EXPORT_NAME', 'foo')
-    create_file('post.js', 'if (!isPthread) foo();')
-    self.emcc_args += ['--extern-post-js', 'post.js']
+    self.emcc_args += ['--extern-post-js', test_file('modularize_post_js.js')]
     if '-g' in self.emcc_args:
       self.emcc_args += ['-DDEBUG']
     self.do_runf('core/test_return_address.c', 'passed')
