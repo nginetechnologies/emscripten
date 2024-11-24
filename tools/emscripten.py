@@ -1022,6 +1022,7 @@ def create_pointer_conversion_wrappers(metadata):
     'sbrk': 'pP',
     '_emscripten_stack_alloc': 'pp',
     'emscripten_builtin_malloc': 'pp',
+    'emscripten_builtin_calloc': 'ppp',
     'malloc': 'pp',
     'calloc': 'ppp',
     'webidl_malloc': 'pp',
@@ -1129,6 +1130,6 @@ function applySignatureConversions(wasmExports) {
   for f in wrap_functions:
     sig = mapping[f]
     wrappers += f"\n  wasmExports['{f}'] = makeWrapper_{sig}(wasmExports['{f}']);"
-  wrappers += 'return wasmExports;\n}'
+  wrappers += '\n  return wasmExports;\n}'
 
   return wrappers

@@ -178,7 +178,7 @@ var LibraryPThread = {
       }
       PThread.unusedWorkers = [];
       PThread.runningWorkers = [];
-      PThread.pthreads = [];
+      PThread.pthreads = {};
     },
     returnWorkerToPool: (worker) => {
       // We don't want to run main thread queued calls here, since we are doing
@@ -239,16 +239,16 @@ var LibraryPThread = {
     loadWasmModuleToWorker: (worker) => new Promise((onFinishedLoading) => {
       worker.onmessage = (e) => {
         var d = e['data'];
-        var cmd = d['cmd'];
+        var cmd = d.cmd;
 
         // If this message is intended to a recipient that is not the main
         // thread, forward it to the target thread.
-        if (d['targetThread'] && d['targetThread'] != _pthread_self()) {
-          var targetWorker = PThread.pthreads[d['targetThread']];
+        if (d.targetThread && d.targetThread != _pthread_self()) {
+          var targetWorker = PThread.pthreads[d.targetThread];
           if (targetWorker) {
-            targetWorker.postMessage(d, d['transferList']);
+            targetWorker.postMessage(d, d.transferList);
           } else {
-            err(`Internal error! Worker sent a message "${cmd}" to target pthread ${d['targetThread']}, but that thread no longer exists!`);
+            err(`Internal error! Worker sent a message "${cmd}" to target pthread ${d.targetThread}, but that thread no longer exists!`);
           }
           return;
         }
@@ -258,10 +258,10 @@ var LibraryPThread = {
         } else if (cmd === 'spawnThread') {
           spawnThread(d);
         } else if (cmd === 'cleanupThread') {
-          cleanupThread(d['thread']);
+          cleanupThread(d.thread);
 #if MAIN_MODULE
         } else if (cmd === 'markAsFinished') {
-          markAsFinished(d['thread']);
+          markAsFinished(d.thread);
 #endif
         } else if (cmd === 'loaded') {
           worker.loaded = true;
@@ -276,13 +276,13 @@ var LibraryPThread = {
 #endif
           onFinishedLoading(worker);
         } else if (cmd === 'alert') {
-          alert(`Thread ${d['threadId']}: ${d['text']}`);
+          alert(`Thread ${d.threadId}: ${d.text}`);
         } else if (d.target === 'setimmediate') {
           // Worker wants to postMessage() to itself to implement setImmediate()
           // emulation.
           worker.postMessage(d);
         } else if (cmd === 'callHandler') {
-          Module[d['handler']](...d['args']);
+          Module[d.handler](...d.args);
         } else if (cmd) {
           // The received message looks like something that should be handled by this message
           // handler, (since there is a e.data.cmd field present), but is not one of the
@@ -343,28 +343,28 @@ var LibraryPThread = {
 
       // Ask the new worker to load up the Emscripten-compiled page. This is a heavy operation.
       worker.postMessage({
-        'cmd': 'load',
-        'handlers': handlers,
+        cmd: 'load',
+        handlers: handlers,
 #if WASM2JS
         // the polyfill WebAssembly.Memory instance has function properties,
         // which will fail in postMessage, so just send a custom object with the
         // property we need, the buffer
-        'wasmMemory': { 'buffer': wasmMemory.buffer },
+        wasmMemory: { 'buffer': wasmMemory.buffer },
 #else // WASM2JS
-        'wasmMemory': wasmMemory,
+        wasmMemory,
 #endif // WASM2JS
-        'wasmModule': wasmModule,
+        wasmModule,
 #if LOAD_SOURCE_MAP
-        'wasmSourceMap': wasmSourceMap,
+        wasmSourceMap,
 #endif
 #if USE_OFFSET_CONVERTER
-        'wasmOffsetConverter': wasmOffsetConverter,
+        wasmOffsetConverter,
 #endif
 #if MAIN_MODULE
-        'dynamicLibraries': dynamicLibraries,
+        dynamicLibraries,
         // Share all modules that have been loaded so far.  New workers
         // won't start running threads until these are all loaded.
-        'sharedModules': sharedModules,
+        sharedModules,
 #endif
 #if ASSERTIONS
         'workerID': worker.workerID,
@@ -415,7 +415,11 @@ var LibraryPThread = {
 #if ENVIRONMENT_MAY_BE_WEB || ENVIRONMENT_MAY_BE_WORKER
         // This is the way that we signal to the Web Worker that it is hosting
         // a pthread.
+#if ASSERTIONS
+        'name': 'em-pthread-' + PThread.nextWorkerID,
+#else
         'name': 'em-pthread',
+#endif
 #endif
       };
 #if EXPORT_ES6 && USE_ES6_IMPORT_META
@@ -513,7 +517,7 @@ var LibraryPThread = {
     // the onmessage handlers if the message was coming from valid worker.
     worker.onmessage = (e) => {
 #if ASSERTIONS
-      var cmd = e['data']['cmd'];
+      var cmd = e['data'].cmd;
       err(`received "${cmd}" command from terminated worker: ${worker.workerID}`);
 #endif
     };
@@ -529,7 +533,7 @@ var LibraryPThread = {
     dbg(`_emscripten_thread_cleanup: ${ptrToString(thread)}`)
 #endif
     if (!ENVIRONMENT_IS_PTHREAD) cleanupThread(thread);
-    else postMessage({ 'cmd': 'cleanupThread', 'thread': thread });
+    else postMessage({ cmd: 'cleanupThread', thread });
   },
 
   _emscripten_thread_set_strongref: (thread) => {
@@ -628,10 +632,10 @@ var LibraryPThread = {
 
     worker.pthread_ptr = threadParams.pthread_ptr;
     var msg = {
-        'cmd': 'run',
-        'start_routine': threadParams.startRoutine,
-        'arg': threadParams.arg,
-        'pthread_ptr': threadParams.pthread_ptr,
+        cmd: 'run',
+        start_routine: threadParams.startRoutine,
+        arg: threadParams.arg,
+        pthread_ptr: threadParams.pthread_ptr,
     };
 #if OFFSCREENCANVAS_SUPPORT
     // Note that we do not need to quote these names because they are only used
@@ -652,14 +656,6 @@ var LibraryPThread = {
     worker.postMessage(msg, threadParams.transferList);
     return 0;
   },
-
-  emscripten_has_threading_support: () => typeof SharedArrayBuffer != 'undefined',
-
-  emscripten_num_logical_cores: () =>
-#if ENVIRONMENT_MAY_BE_NODE
-    ENVIRONMENT_IS_NODE ? require('os').cpus().length :
-#endif
-    navigator['hardwareConcurrency'],
 
   _emscripten_init_main_thread_js: (tb) => {
     // Pass the thread address to the native code where they stored in wasm
@@ -696,13 +692,16 @@ var LibraryPThread = {
   __pthread_create_js__noleakcheck: true,
 #endif
   __pthread_create_js__deps: ['$spawnThread', 'pthread_self', '$pthreadCreateProxied',
+    'emscripten_has_threading_support',
 #if OFFSCREENCANVAS_SUPPORT
     'malloc',
 #endif
   ],
   __pthread_create_js: (pthread_ptr, attr, startRoutine, arg) => {
-    if (typeof SharedArrayBuffer == 'undefined') {
-      err('Current environment does not support SharedArrayBuffer, pthreads are not available!');
+    if (!_emscripten_has_threading_support()) {
+#if ASSERTIONS
+      dbg('pthread_create: environment does not support SharedArrayBuffer, pthreads are not available');
+#endif
       return {{{ cDefs.EAGAIN }}};
     }
 #if PTHREADS_DEBUG
@@ -726,8 +725,10 @@ var LibraryPThread = {
       transferredCanvasNames = '{{{ OFFSCREENCANVASES_TO_PTHREAD }}}';
     } else
 #endif
-    transferredCanvasNames &&= UTF8ToString(transferredCanvasNames).trim();
-    transferredCanvasNames &&= transferredCanvasNames.split(',');
+    {
+      transferredCanvasNames = UTF8ToString(transferredCanvasNames).trim();
+    }
+    transferredCanvasNames = transferredCanvasNames ? transferredCanvasNames.split(',') : [];
 #if GL_DEBUG
     dbg(`pthread_create: transferredCanvasNames="${transferredCanvasNames}"`);
 #endif
@@ -1052,7 +1053,7 @@ var LibraryPThread = {
     '$runtimeKeepaliveCounter',
 #endif
   ],
-  $invokeEntryPoint: (ptr, arg) => {
+  $invokeEntryPoint: {{{ asyncIf(ASYNCIFY == 2) }}} (ptr, arg) => {
 #if PTHREADS_DEBUG
     dbg(`invokeEntryPoint: ${ptrToString(ptr)}`);
 #endif
@@ -1088,7 +1089,9 @@ var LibraryPThread = {
     // *ThreadMain(void *arg) form, or try linking with the Emscripten linker
     // flag -sEMULATE_FUNCTION_POINTER_CASTS to add in emulation for this x86
     // ABI extension.
-    var result = {{{ makeDynCall('pp', 'ptr') }}}(arg);
+
+    var result = {{{ makeDynCall('pp', 'ptr', ASYNCIFY == 2) }}}(arg);
+
 #if STACK_OVERFLOW_CHECK
     checkStackCookie();
 #endif
@@ -1107,10 +1110,9 @@ var LibraryPThread = {
 #endif
     }
 #if ASYNCIFY == 2
-    Promise.resolve(result).then(finish);
-#else
-    finish(result);
+    result = await result;
 #endif
+    finish(result);
   },
 
 #if MAIN_MODULE
@@ -1120,7 +1122,7 @@ var LibraryPThread = {
     // running, but remain around waiting to be joined.  In this state they
     // cannot run any more proxied work.
     if (!ENVIRONMENT_IS_PTHREAD) markAsFinished(thread);
-    else postMessage({ 'cmd': 'markAsFinished', 'thread': thread });
+    else postMessage({ cmd: 'markAsFinished', thread });
   },
 
   $markAsFinished: (pthread_ptr) => {
@@ -1252,20 +1254,20 @@ var LibraryPThread = {
   // new thread that has not had a chance to initialize itself and execute
   // Atomics.waitAsync to prepare for the notification.
   _emscripten_notify_mailbox_postmessage__deps: ['$checkMailbox'],
-  _emscripten_notify_mailbox_postmessage: (targetThreadId, currThreadId, mainThreadId) => {
-    if (targetThreadId == currThreadId) {
+  _emscripten_notify_mailbox_postmessage: (targetThread, currThreadId) => {
+    if (targetThread == currThreadId) {
       setTimeout(checkMailbox);
     } else if (ENVIRONMENT_IS_PTHREAD) {
-      postMessage({'targetThread' : targetThreadId, 'cmd' : 'checkMailbox'});
+      postMessage({targetThread, cmd: 'checkMailbox'});
     } else {
-      var worker = PThread.pthreads[targetThreadId];
+      var worker = PThread.pthreads[targetThread];
       if (!worker) {
 #if ASSERTIONS
-        err(`Cannot send message to thread with ID ${targetThreadId}, unknown thread ID!`);
+        err(`Cannot send message to thread with ID ${targetThread}, unknown thread ID!`);
 #endif
         return;
       }
-      worker.postMessage({'cmd' : 'checkMailbox'});
+      worker.postMessage({cmd: 'checkMailbox'});
     }
   }
 };

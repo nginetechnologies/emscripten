@@ -10,35 +10,27 @@ addToLibrary({
     if (!ENVIRONMENT_IS_NODE) {
       throw new Error("NODERAWFS is currently only supported on Node.js environment.")
     }
-    // Use this to reference our in-memory filesystem
-    var VFS = Object.assign({}, FS);
-    // Override the init function with our own
-    FS.init = NODERAWFS.init;`,
-  $NODERAWFS: {
-    init() {
-      var _wrapNodeError = function(func) {
-        return function(...args) {
-          try {
-            return func(...args)
-          } catch (e) {
-            if (e.code) {
-              throw new FS.ErrnoError(ERRNO_CODES[e.code]);
-            }
-            throw e;
+    var _wrapNodeError = function(func) {
+      return function(...args) {
+        try {
+          return func(...args)
+        } catch (e) {
+          if (e.code) {
+            throw new FS.ErrnoError(ERRNO_CODES[e.code]);
           }
+          throw e;
         }
-      };
-
-      // Wrap the whole in-memory filesystem API with
-      // our Node.js based functions
-      for (var _key in NODERAWFS) {
-        /** @suppress {partialAlias} */
-        FS[_key] = _wrapNodeError(NODERAWFS[_key]);
       }
-
-      // Setup the stdin, stdout and stderr devices
-      FS.createStandardStreams();
-    },
+    };
+    // Use this to reference our in-memory filesystem
+    /** @suppress {partialAlias} */
+    var VFS = Object.assign({}, FS);
+    // Wrap the whole in-memory filesystem API with
+    // our Node.js based functions
+    for (var _key in NODERAWFS) {
+      FS[_key] = _wrapNodeError(NODERAWFS[_key]);
+    }`,
+  $NODERAWFS: {
     lookup(parent, name) {
 #if ASSERTIONS
       assert(parent)
@@ -99,7 +91,17 @@ addToLibrary({
       var stream = FS.getStreamChecked(fd);
       fs.ftruncateSync(stream.nfd, len);
     },
-    utime(path, atime, mtime) { fs.utimesSync(path, atime/1000, mtime/1000); },
+    utime(path, atime, mtime) {
+      // -1 here for atime or mtime means UTIME_OMIT was passed.  Since node
+      // doesn't support this concept we need to first find the existing
+      // timestamps in order to preserve them.
+      if (atime == -1 || mtime == -1) {
+        var st = fs.statSync(path);
+        if (atime == -1) atime = st.atimeMs;
+        if (mtime == -1) mtime = st.mtimeMs;
+      }
+      fs.utimesSync(path, atime/1000, mtime/1000);
+    },
     open(path, flags, mode) {
       if (typeof flags == "string") {
         flags = FS_modeStringToFlags(flags)

@@ -495,10 +495,6 @@ def setup_pthreads():
 
   default_setting('DEFAULT_PTHREAD_STACK_SIZE', settings.STACK_SIZE)
 
-  if not settings.MINIMAL_RUNTIME and 'instantiateWasm' not in settings.INCOMING_MODULE_JS_API:
-    # pthreads runtime depends on overriding instantiateWasm
-    settings.INCOMING_MODULE_JS_API.append('instantiateWasm')
-
   # Functions needs by runtime_pthread.js
   settings.REQUIRED_EXPORTS += [
     '_emscripten_thread_free_data',
@@ -658,9 +654,6 @@ def phase_linker_setup(options, state, newargs):
     # Add `#!` line to output JS and make it executable.
     options.executable = True
 
-  if 'noExitRuntime' in settings.INCOMING_MODULE_JS_API:
-    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('$noExitRuntime')
-
   if settings.OPT_LEVEL >= 1:
     default_setting('ASSERTIONS', 0)
 
@@ -673,18 +666,19 @@ def phase_linker_setup(options, state, newargs):
   if options.cpu_profiler:
     options.post_js.append(utils.path_from_root('src/cpuprofiler.js'))
 
-  if not settings.RUNTIME_DEBUG:
-    settings.RUNTIME_DEBUG = bool(settings.LIBRARY_DEBUG or
-                                  settings.GL_DEBUG or
-                                  settings.DYLINK_DEBUG or
-                                  settings.OPENAL_DEBUG or
-                                  settings.SYSCALL_DEBUG or
-                                  settings.WEBSOCKET_DEBUG or
-                                  settings.SOCKET_DEBUG or
-                                  settings.FETCH_DEBUG or
-                                  settings.EXCEPTION_DEBUG or
-                                  settings.PTHREADS_DEBUG or
-                                  settings.ASYNCIFY_DEBUG)
+  # Unless RUNTIME_DEBUG is explicitly set then we enable it when any of the
+  # more specfic debug settings are present.
+  default_setting('RUNTIME_DEBUG', int(settings.LIBRARY_DEBUG or
+                                       settings.GL_DEBUG or
+                                       settings.DYLINK_DEBUG or
+                                       settings.OPENAL_DEBUG or
+                                       settings.SYSCALL_DEBUG or
+                                       settings.WEBSOCKET_DEBUG or
+                                       settings.SOCKET_DEBUG or
+                                       settings.FETCH_DEBUG or
+                                       settings.EXCEPTION_DEBUG or
+                                       settings.PTHREADS_DEBUG or
+                                       settings.ASYNCIFY_DEBUG))
 
   if options.memory_profiler:
     settings.MEMORYPROFILER = 1
@@ -802,7 +796,11 @@ def phase_linker_setup(options, state, newargs):
   if settings.PURE_WASI:
     settings.STANDALONE_WASM = 1
     settings.WASM_BIGINT = 1
-    settings.SUPPORT_LONGJMP = 0
+    # WASI does not support Emscripten (JS-based) exception catching, which the
+    # JS-based longjmp support also uses. Emscripten EH is by default disabled
+    # so we don't need to do anything here.
+    if not settings.WASM_EXCEPTIONS:
+      default_setting('SUPPORT_LONGJMP', 0)
 
   if options.no_entry:
     settings.EXPECT_MAIN = 0
@@ -913,6 +911,9 @@ def phase_linker_setup(options, state, newargs):
       default_setting('INCOMING_MODULE_JS_API', 'canvas,monitorRunDependencies,onAbort,onExit,print,setStatus'.split(','))
     else:
       default_setting('INCOMING_MODULE_JS_API', [])
+
+  if 'noExitRuntime' in settings.INCOMING_MODULE_JS_API:
+    settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE.append('$noExitRuntime')
 
   if not settings.MINIMAL_RUNTIME and not settings.STRICT:
     # Export the HEAP object by default, when not running in STRICT mode
@@ -1202,6 +1203,10 @@ def phase_linker_setup(options, state, newargs):
     # if we include any files, or intend to use preload plugins, then we definitely need filesystem support
     settings.FORCE_FILESYSTEM = 1
 
+  if options.preload_files:
+    # File preloading uses `Module['preRun']`.
+    settings.INCOMING_MODULE_JS_API.append('preRun')
+
   if settings.FORCE_FILESYSTEM and not settings.FILESYSTEM:
     exit_with_error('`-sFORCE_FILESYSTEM` cannot be used with `-sFILESYSTEM=0`')
 
@@ -1409,7 +1414,7 @@ def phase_linker_setup(options, state, newargs):
       'removeRunDependency',
     ]
 
-  if settings.SHARED_MEMORY or settings.RELOCATABLE or settings.ASYNCIFY_LAZY_LOAD_CODE:
+  if settings.PTHREADS or settings.WASM_WORKERS or settings.RELOCATABLE or settings.ASYNCIFY_LAZY_LOAD_CODE:
     settings.IMPORTED_MEMORY = 1
 
   set_initial_memory()
@@ -1518,11 +1523,18 @@ def phase_linker_setup(options, state, newargs):
 
   if sanitize:
     settings.USE_OFFSET_CONVERTER = 1
+    # These symbols are needed by `withBuiltinMalloc` which used to implement
+    # the `__noleakcheck` attribute.  However this dependency is not yet represented in the JS
+    # symbol graph generated when we run the compiler with `--symbols-only`.
     settings.REQUIRED_EXPORTS += [
-        'memalign',
-        'emscripten_builtin_memalign',
-        'emscripten_builtin_malloc',
-        'emscripten_builtin_free',
+      'malloc',
+      'calloc',
+      'memalign',
+      'free',
+      'emscripten_builtin_malloc',
+      'emscripten_builtin_calloc',
+      'emscripten_builtin_memalign',
+      'emscripten_builtin_free',
     ]
 
   if ('leak' in sanitize or 'address' in sanitize) and not settings.ALLOW_MEMORY_GROWTH:
@@ -1938,6 +1950,7 @@ def run_embind_gen(wasm_target, js_syms, extra_settings, linker_inputs):
       if building.is_wasm_dylib(linker_input):
         safe_copy(linker_input, in_temp(''))
 
+  settings.EXPORTED_RUNTIME_METHODS = []
   # Ignore any options or settings that can conflict with running the TS
   # generation output.
   # Don't invoke the program's `main` function.
@@ -1973,6 +1986,8 @@ def run_embind_gen(wasm_target, js_syms, extra_settings, linker_inputs):
   settings.JS_LIBRARIES[embind_index] = 'embind/embind_gen.js'
   if settings.MEMORY64:
     settings.MIN_NODE_VERSION = 160000
+  # Source maps haven't been generated yet and aren't needed to run embind_gen.
+  settings.LOAD_SOURCE_MAP = 0
   outfile_js = in_temp('tsgen.js')
   # The Wasm outfile may be modified by emscripten.emscript, so use a temporary file.
   outfile_wasm = in_temp('tsgen.wasm')
@@ -1999,7 +2014,7 @@ def phase_emit_tsd(options, wasm_target, js_target, js_syms, metadata, linker_in
   filename = options.emit_tsd
   embind_tsd = ''
   if settings.EMBIND:
-    embind_tsd = run_embind_gen(wasm_target, js_syms, {'EMBIND_JS': False}, linker_inputs)
+    embind_tsd = run_embind_gen(wasm_target, js_syms, {'EMBIND_AOT': False}, linker_inputs)
   all_tsd = emscripten.create_tsd(metadata, embind_tsd)
   out_file = os.path.join(os.path.dirname(js_target), filename)
   write_file(out_file, all_tsd)
@@ -2079,15 +2094,6 @@ def phase_final_emitting(options, state, target, wasm_target):
     return
 
   target_dir = os.path.dirname(os.path.abspath(target))
-  if settings.PTHREADS and not settings.STRICT:
-    worker_file = shared.replace_suffix(target, get_worker_js_suffix())
-    write_file(worker_file, '''\
-// This file is no longer used by emscripten and has been created as a placeholder
-// to allow build systems to transition away from depending on it.
-//
-// Future versions of emscripten will likely stop generating this file at all.
-throw new Error('Dummy worker.js file should never be used');
-''')
 
   # Deploy the Wasm Worker bootstrap file as an output file (*.ww.js)
   if settings.WASM_WORKERS == 1:
@@ -2456,7 +2462,7 @@ else if (typeof define === 'function' && define['amd'])
     # when running in MODULARIZE mode we need use this to know if we should
     # run the module constructor on startup (true only for pthreads).
     if settings.ENVIRONMENT_MAY_BE_WEB or settings.ENVIRONMENT_MAY_BE_WORKER:
-      src += "var isPthread = globalThis.self?.name === 'em-pthread';\n"
+      src += "var isPthread = globalThis.self?.name?.startsWith('em-pthread');\n"
       # In order to support both web and node we also need to detect node here.
       if settings.ENVIRONMENT_MAY_BE_NODE:
         src += "var isNode = typeof globalThis.process?.versions?.node == 'string';\n"
@@ -2512,7 +2518,7 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
   var filename = '%s';
   if ((',' + window.location.search.substr(1) + ',').indexOf(',noProxy,') < 0) {
     console.log('running code in a web worker');
-''' % get_subresource_location(proxy_worker_filename)) + worker_js + '''
+''' % get_subresource_location_js(proxy_worker_filename)) + worker_js + '''
   } else {
     console.log('running code on the main thread');
     var fileBytes = tryParseAsDataURI(filename);
@@ -2535,7 +2541,20 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
     # Normal code generation path
     script.src = base_js_target
 
-  if not settings.SINGLE_FILE:
+  if settings.SINGLE_FILE:
+    # In SINGLE_FILE mode we either inline the script, or in the case
+    # of SHARED_MEMORY convert the entire thing into a data URL.
+    if settings.SHARED_MEMORY:
+      assert not script.inline
+      script.src = get_subresource_location(js_target)
+    else:
+      js_contents = script.inline or ''
+      if script.src:
+        js_contents += read_file(js_target)
+      script.src = None
+      script.inline = read_file(js_target)
+    delete_file(js_target)
+  else:
     if not settings.WASM_ASYNC_COMPILATION:
       # We need to load the wasm file before anything else, since it
       # has be synchronously ready.
@@ -2567,16 +2586,7 @@ def generate_traditional_runtime_html(target, options, js_target, target_basenam
             // Current browser supports Wasm, proceed with loading the main JS runtime.
             loadMainJs();
           }
-''' % (script.inline, get_subresource_location(wasm_target) + '.js')
-
-  # inline script for SINGLE_FILE output
-  if settings.SINGLE_FILE:
-    js_contents = script.inline or ''
-    if script.src:
-      js_contents += read_file(js_target)
-    delete_file(js_target)
-    script.src = None
-    script.inline = js_contents
+''' % (script.inline, get_subresource_location_js(wasm_target + '.js'))
 
   shell = do_replace(shell, '{{{ SCRIPT }}}', script.replacement())
   shell = shell.replace('{{{ SHELL_CSS }}}', utils.read_file(utils.path_from_root('src/shell.css')))
@@ -2652,7 +2662,7 @@ def generate_html(target, options, js_target, target_basename, wasm_target):
 def generate_worker_js(target, js_target, target_basename):
   if settings.SINGLE_FILE:
     # compiler output is embedded as base64 data URL
-    proxy_worker_filename = get_subresource_location(js_target)
+    proxy_worker_filename = get_subresource_location_js(js_target)
   else:
     # compiler output goes in .worker.js file
     move_file(js_target, shared.replace_suffix(js_target, get_worker_js_suffix()))
@@ -2820,16 +2830,21 @@ class ScriptSource:
     """Returns the script tag to replace the {{{ SCRIPT }}} tag in the target"""
     assert (self.src or self.inline) and not (self.src and self.inline)
     if self.src:
-      quoted_src = quote(self.src)
+      src = self.src
+      if src.startswith('data:'):
+        filename = src
+      else:
+        src = quote(self.src)
+        filename = f'./{src}'
       if settings.EXPORT_ES6:
         return f'''
         <script type="module">
-          import initModule from "./{quoted_src}";
+          import initModule from "{filename}";
           initModule(Module);
         </script>
         '''
       else:
-        return f'<script async type="text/javascript" src="{quoted_src}"></script>'
+        return f'<script async type="text/javascript" src="{src}"></script>'
     else:
       return '<script>\n%s\n</script>' % self.inline
 
@@ -2960,11 +2975,15 @@ def move_file(src, dst):
 
 
 # Returns the subresource location for run-time access
-def get_subresource_location(path):
+def get_subresource_location(path, mimetype='application/octet-stream'):
   if settings.SINGLE_FILE:
-    return 'data:application/octet-stream;base64,' + base64_encode(path)
+    return f'data:{mimetype};base64,{base64_encode(path)}'
   else:
     return os.path.basename(path)
+
+
+def get_subresource_location_js(path):
+  return get_subresource_location(path, 'text/javascript')
 
 
 @ToolchainProfiler.profile()
